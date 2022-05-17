@@ -76,11 +76,12 @@ void StoreRGBA(D d, V r, V g, V b, V a, bool alpha, size_t n, size_t extra,
 
 class WriteToU8Stage : public RenderPipelineStage {
  public:
-  WriteToU8Stage(uint8_t* rgb, size_t stride, size_t height, bool rgba,
-                 bool has_alpha, size_t alpha_c)
+  WriteToU8Stage(uint8_t* rgb, size_t stride, size_t width, size_t height,
+                 bool rgba, bool has_alpha, size_t alpha_c)
       : RenderPipelineStage(RenderPipelineStage::Settings()),
         rgb_(rgb),
         stride_(stride),
+        width_(width),
         height_(height),
         rgba_(rgba),
         has_alpha_(has_alpha),
@@ -124,7 +125,7 @@ class WriteToU8Stage : public RenderPipelineStage {
       auto g8 = U8FromU32(BitCast(du, NearestInt(gf)));
       auto b8 = U8FromU32(BitCast(du, NearestInt(bf)));
       auto a8 = U8FromU32(BitCast(du, NearestInt(af)));
-      size_t n = xsize - x;
+      size_t n = width_ - xpos - x;
       if (JXL_LIKELY(n >= Lanes(d))) {
         StoreRGBA(D::Rebind<uint8_t>(), r8, g8, b8, a8, rgba_, Lanes(d), n,
                   rgb_ + base_ptr + bytes * x);
@@ -146,6 +147,7 @@ class WriteToU8Stage : public RenderPipelineStage {
  private:
   uint8_t* rgb_;
   size_t stride_;
+  size_t width_;
   size_t height_;
   bool rgba_;
   bool has_alpha_;
@@ -153,13 +155,11 @@ class WriteToU8Stage : public RenderPipelineStage {
   std::vector<float> opaque_alpha_;
 };
 
-std::unique_ptr<RenderPipelineStage> GetWriteToU8Stage(uint8_t* rgb,
-                                                       size_t stride,
-                                                       size_t height, bool rgba,
-                                                       bool has_alpha,
-                                                       size_t alpha_c) {
-  return jxl::make_unique<WriteToU8Stage>(rgb, stride, height, rgba, has_alpha,
-                                          alpha_c);
+std::unique_ptr<RenderPipelineStage> GetWriteToU8Stage(
+    uint8_t* rgb, size_t stride, size_t width, size_t height, bool rgba,
+    bool has_alpha, size_t alpha_c) {
+  return jxl::make_unique<WriteToU8Stage>(rgb, stride, width, height, rgba,
+                                          has_alpha, alpha_c);
 }
 
 // NOLINTNEXTLINE(google-readability-namespace-comments)
@@ -371,13 +371,11 @@ std::unique_ptr<RenderPipelineStage> GetWriteToImage3FStage(Image3F* image) {
   return jxl::make_unique<WriteToImage3FStage>(image);
 }
 
-std::unique_ptr<RenderPipelineStage> GetWriteToU8Stage(uint8_t* rgb,
-                                                       size_t stride,
-                                                       size_t height, bool rgba,
-                                                       bool has_alpha,
-                                                       size_t alpha_c) {
-  return HWY_DYNAMIC_DISPATCH(GetWriteToU8Stage)(rgb, stride, height, rgba,
-                                                 has_alpha, alpha_c);
+std::unique_ptr<RenderPipelineStage> GetWriteToU8Stage(
+    uint8_t* rgb, size_t stride, size_t width, size_t height, bool rgba,
+    bool has_alpha, size_t alpha_c) {
+  return HWY_DYNAMIC_DISPATCH(GetWriteToU8Stage)(rgb, stride, width, height,
+                                                 rgba, has_alpha, alpha_c);
 }
 
 std::unique_ptr<RenderPipelineStage> GetWriteToPixelCallbackStage(
