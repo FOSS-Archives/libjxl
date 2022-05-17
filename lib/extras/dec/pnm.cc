@@ -169,7 +169,7 @@ class Parser {
     return true;
   }
 
-  Status MatchString(const char* keyword, bool skipws = true) {
+  Status MatchString(const char* keyword) {
     const uint8_t* ppos = pos_;
     while (*keyword) {
       if (ppos >= end_) return JXL_FAILURE("PAM: unexpected end of input");
@@ -178,18 +178,14 @@ class Parser {
       keyword++;
     }
     pos_ = ppos;
-    if (skipws) {
-      JXL_RETURN_IF_ERROR(SkipWhitespace());
-    } else {
-      JXL_RETURN_IF_ERROR(SkipSingleWhitespace());
-    }
+    JXL_RETURN_IF_ERROR(SkipWhitespace());
     return true;
   }
 
   Status ParseHeaderPAM(HeaderPNM* header, const uint8_t** pos) {
     size_t depth = 3;
     size_t max_val = 255;
-    while (!MatchString("ENDHDR", /*skipws=*/false)) {
+    while (!MatchString("ENDHDR")) {
       JXL_RETURN_IF_ERROR(SkipWhitespace());
       if (MatchString("WIDTH")) {
         JXL_RETURN_IF_ERROR(ParseUnsigned(&header->xsize));
