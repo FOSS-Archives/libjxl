@@ -242,8 +242,18 @@ class FrameDecoder {
   // (uint8 output buffer or float pixel callback).
   // TODO(veluca): reduce this set of restrictions.
   bool CanDoLowMemoryPath(bool undo_orientation) const {
-    return !(undo_orientation &&
-             decoded_->metadata()->GetOrientation() != Orientation::kIdentity);
+    if (undo_orientation &&
+        decoded_->metadata()->GetOrientation() != Orientation::kIdentity) {
+      return false;
+    }
+    if (NeedsBlending(dec_state_)) return false;
+    if (frame_header_.CanBeReferenced()) return false;
+    if (render_spotcolors_ &&
+        decoded_->metadata()->Find(ExtraChannel::kSpotColor)) {
+      return false;
+    }
+    if (decoded_->AlphaIsPremultiplied()) return false;
+    return true;
   }
 
   PassesDecoderState* dec_state_;
