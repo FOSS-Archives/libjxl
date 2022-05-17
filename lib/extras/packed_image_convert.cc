@@ -268,7 +268,8 @@ Status ConvertCodecInOutToPackedPixelFile(const CodecInOut& io,
         format.endianness,
         /* stride_out=*/packed_frame.color.stride, pool,
         packed_frame.color.pixels(), packed_frame.color.pixels_size,
-        /*out_callback=*/{}, frame.metadata()->GetOrientation()));
+        /*out_callback=*/nullptr, /*out_opaque=*/nullptr,
+        frame.metadata()->GetOrientation()));
 
     // TODO(firsching): Convert the extra channels, beside one potential alpha
     // channel. FIXME!

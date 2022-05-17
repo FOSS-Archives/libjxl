@@ -180,7 +180,7 @@ Status PassesDecoderState::PreparePipeline(ImageBundle* decoded,
       }
     }
 
-    if (pixel_callback.IsPresent()) {
+    if (pixel_callback) {
       builder.AddStage(GetWriteToPixelCallbackStage(pixel_callback, width,
                                                     height, rgb_output_is_rgba,
                                                     has_alpha, alpha_c));
