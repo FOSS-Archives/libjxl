@@ -222,7 +222,7 @@ std::vector<RenderPipelineTestInputSettings> GeneratePipelineTests() {
 
   for (auto size : sizes) {
     RenderPipelineTestInputSettings settings;
-    settings.input_path = "third_party/imagecompression.info/flower_foveon.png";
+    settings.input_path = "imagecompression.info/flower_foveon.png";
     settings.xsize = size.first;
     settings.ysize = size.second;
 
@@ -354,16 +354,14 @@ std::vector<RenderPipelineTestInputSettings> GeneratePipelineTests() {
 
     {
       auto s = settings;
-      s.input_path =
-          "third_party/imagecompression.info/flower_foveon_alpha.png";
+      s.input_path = "imagecompression.info/flower_foveon_alpha.png";
       s.cparams_descr = "AlphaVarDCT";
       all_tests.push_back(s);
     }
 
     {
       auto s = settings;
-      s.input_path =
-          "third_party/imagecompression.info/flower_foveon_alpha.png";
+      s.input_path = "imagecompression.info/flower_foveon_alpha.png";
       s.cparams_descr = "AlphaVarDCTUpsamplingEPF";
       s.cparams.epf = 1;
       s.cparams.ec_resampling = 2;
@@ -374,16 +372,14 @@ std::vector<RenderPipelineTestInputSettings> GeneratePipelineTests() {
       auto s = settings;
       s.cparams.modular_mode = true;
       s.cparams.butteraugli_distance = 0;
-      s.input_path =
-          "third_party/imagecompression.info/flower_foveon_alpha.png";
+      s.input_path = "imagecompression.info/flower_foveon_alpha.png";
       s.cparams_descr = "AlphaLossless";
       all_tests.push_back(s);
     }
 
     {
       auto s = settings;
-      s.input_path =
-          "third_party/imagecompression.info/flower_foveon_alpha.png";
+      s.input_path = "imagecompression.info/flower_foveon_alpha.png";
       s.cparams_descr = "AlphaDownsample";
       s.cparams.ec_resampling = 2;
       all_tests.push_back(s);
@@ -399,10 +395,10 @@ std::vector<RenderPipelineTestInputSettings> GeneratePipelineTests() {
 
 #if JPEGXL_ENABLE_TRANSCODE_JPEG
   for (const char* input :
-       {"third_party/imagecompression.info/flower_foveon.png.im_q85_444.jpg",
-        "third_party/imagecompression.info/flower_foveon.png.im_q85_420.jpg",
-        "third_party/imagecompression.info/flower_foveon.png.im_q85_422.jpg",
-        "third_party/imagecompression.info/flower_foveon.png.im_q85_440.jpg"}) {
+       {"imagecompression.info/flower_foveon.png.im_q85_444.jpg",
+        "imagecompression.info/flower_foveon.png.im_q85_420.jpg",
+        "imagecompression.info/flower_foveon.png.im_q85_422.jpg",
+        "imagecompression.info/flower_foveon.png.im_q85_440.jpg"}) {
     RenderPipelineTestInputSettings settings;
     settings.input_path = input;
     settings.jpeg_transcode = true;
