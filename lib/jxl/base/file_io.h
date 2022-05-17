@@ -77,8 +77,7 @@ template <typename ContainerType>
 static inline Status ReadFile(const std::string& pathname,
                               ContainerType* JXL_RESTRICT bytes) {
   FileWrapper f(pathname, "rb");
-  if (f == nullptr)
-    return JXL_FAILURE("Failed to open file for reading: %s", pathname.c_str());
+  if (f == nullptr) return JXL_FAILURE("Failed to open file for reading");
 
   // Get size of file in bytes
   const int64_t size = f.size();
