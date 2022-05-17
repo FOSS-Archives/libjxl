@@ -79,17 +79,21 @@ class PackedImage {
 
   static size_t BitsPerChannel(JxlDataType data_type) {
     switch (data_type) {
+      case JXL_TYPE_BOOLEAN:
+        return 1;
       case JXL_TYPE_UINT8:
         return 8;
       case JXL_TYPE_UINT16:
         return 16;
+      case JXL_TYPE_UINT32:
+        return 32;
       case JXL_TYPE_FLOAT:
         return 32;
       case JXL_TYPE_FLOAT16:
         return 16;
-      default:
-        JXL_ABORT("Unhandled JxlDataType");
+        // No default, give compiler error if new type not handled.
     }
+    return 0;  // Indicate invalid data type.
   }
 
  private:

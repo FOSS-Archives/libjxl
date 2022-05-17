@@ -1058,7 +1058,7 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetFrameDistance(
 
 /** DEPRECATED: use JxlEncoderSetFrameDistance instead.
  */
-JXL_EXPORT JXL_DEPRECATED JxlEncoderStatus
+JXL_EXPORT JxlEncoderStatus
 JxlEncoderOptionsSetDistance(JxlEncoderFrameSettings*, float);
 
 /**
@@ -1081,7 +1081,7 @@ JXL_EXPORT JxlEncoderFrameSettings* JxlEncoderFrameSettingsCreate(
 
 /** DEPRECATED: use JxlEncoderFrameSettingsCreate instead.
  */
-JXL_EXPORT JXL_DEPRECATED JxlEncoderFrameSettings* JxlEncoderOptionsCreate(
+JXL_EXPORT JxlEncoderFrameSettings* JxlEncoderOptionsCreate(
     JxlEncoder*, const JxlEncoderFrameSettings*);
 
 /**
