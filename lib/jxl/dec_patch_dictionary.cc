@@ -156,6 +156,9 @@ Status PatchDictionary::Decode(BitReader* br, size_t xsize, size_t ysize,
   if (!decoder.CheckANSFinalState()) {
     return JXL_FAILURE("ANS checksum failure.");
   }
+  if (!HasAny()) {
+    return JXL_FAILURE("Decoded patch dictionary but got none");
+  }
 
   ComputePatchCache();
   return true;
