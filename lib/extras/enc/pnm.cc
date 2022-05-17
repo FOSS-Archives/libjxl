@@ -32,31 +32,99 @@ namespace {
 
 constexpr size_t kMaxHeaderSize = 200;
 
+class PNMEncoder : public Encoder {
+ public:
+  Status Encode(const PackedPixelFile& ppf, EncodedImage* encoded_image,
+                ThreadPool* pool = nullptr) const override {
+    encoded_image->icc = ppf.icc;
+    encoded_image->bitstreams.clear();
+    encoded_image->bitstreams.reserve(ppf.frames.size());
+    for (size_t i = 0; i < ppf.frames.size(); ++i) {
+      encoded_image->bitstreams.emplace_back();
+      JXL_RETURN_IF_ERROR(EncodeImagePNM(ppf, ppf.info.bits_per_sample, pool,
+                                         /*frame_index=*/i,
+                                         &encoded_image->bitstreams.back()));
+    }
+    return true;
+  }
+};
+
+class PPMEncoder : public PNMEncoder {
+ public:
+  std::vector<JxlPixelFormat> AcceptedFormats() const override {
+    std::vector<JxlPixelFormat> formats;
+    for (const uint32_t num_channels : {1, 2, 3, 4}) {
+      for (const JxlDataType data_type : {JXL_TYPE_UINT8, JXL_TYPE_UINT16}) {
+        for (JxlEndianness endianness : {JXL_BIG_ENDIAN, JXL_LITTLE_ENDIAN}) {
+          formats.push_back(JxlPixelFormat{/*num_channels=*/num_channels,
+                                           /*data_type=*/data_type,
+                                           /*endianness=*/endianness,
+                                           /*align=*/0});
+        }
+      }
+    }
+    return formats;
+  }
+};
+
+class PFMEncoder : public PNMEncoder {
+ public:
+  std::vector<JxlPixelFormat> AcceptedFormats() const override {
+    std::vector<JxlPixelFormat> formats;
+    for (const uint32_t num_channels : {1, 3}) {
+      for (const JxlDataType data_type : {JXL_TYPE_FLOAT16, JXL_TYPE_FLOAT}) {
+        for (JxlEndianness endianness : {JXL_BIG_ENDIAN, JXL_LITTLE_ENDIAN}) {
+          formats.push_back(JxlPixelFormat{/*num_channels=*/num_channels,
+                                           /*data_type=*/data_type,
+                                           /*endianness=*/endianness,
+                                           /*align=*/0});
+        }
+      }
+    }
+    return formats;
+  }
+};
+
+class PGMEncoder : public PPMEncoder {
+ public:
+  std::vector<JxlPixelFormat> AcceptedFormats() const override {
+    std::vector<JxlPixelFormat> formats = PPMEncoder::AcceptedFormats();
+    for (auto it = formats.begin(); it != formats.end();) {
+      if (it->num_channels > 2) {
+        it = formats.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    return formats;
+  }
+};
+
 Status EncodeHeader(const PackedPixelFile& ppf, const size_t bits_per_sample,
                     const bool little_endian, char* header,
                     int* JXL_RESTRICT chars_written) {
-  if (ppf.info.alpha_bits > 0) return JXL_FAILURE("PNM: can't store alpha");
   bool is_gray = ppf.info.num_color_channels <= 2;
   size_t oriented_xsize =
       ppf.info.orientation <= 4 ? ppf.info.xsize : ppf.info.ysize;
   size_t oriented_ysize =
       ppf.info.orientation <= 4 ? ppf.info.ysize : ppf.info.xsize;
-
-  if (bits_per_sample == 32) {  // PFM
+  if (ppf.info.alpha_bits > 0) {  // PAM
+    if (bits_per_sample > 16) return JXL_FAILURE("PNM cannot have > 16 bits");
+    const uint32_t max_val = (1U << bits_per_sample) - 1;
+    *chars_written =
+        snprintf(header, kMaxHeaderSize,
+                 "P7\nWIDTH %" PRIuS "\nHEIGHT %" PRIuS
+                 "\nDEPTH %u\nMAXVAL %u\nTUPLTYPE %s\nENDHDR\n",
+                 oriented_xsize, oriented_ysize, is_gray ? 2 : 4, max_val,
+                 is_gray ? "GRAYSCALE_ALPHA" : "RGB_ALPHA");
+    JXL_RETURN_IF_ERROR(static_cast<unsigned int>(*chars_written) <
+                        kMaxHeaderSize);
+  } else if (bits_per_sample == 32) {  // PFM
     const char type = is_gray ? 'f' : 'F';
     const double scale = little_endian ? -1.0 : 1.0;
     *chars_written =
         snprintf(header, kMaxHeaderSize, "P%c\n%" PRIuS " %" PRIuS "\n%.1f\n",
                  type, oriented_xsize, oriented_ysize, scale);
-    JXL_RETURN_IF_ERROR(static_cast<unsigned int>(*chars_written) <
-                        kMaxHeaderSize);
-  } else if (bits_per_sample == 1) {  // PBM
-    if (is_gray) {
-      return JXL_FAILURE("Cannot encode color as PBM");
-    }
-    *chars_written =
-        snprintf(header, kMaxHeaderSize, "P4\n%" PRIuS " %" PRIuS "\n",
-                 oriented_xsize, oriented_ysize);
     JXL_RETURN_IF_ERROR(static_cast<unsigned int>(*chars_written) <
                         kMaxHeaderSize);
   } else {  // PGM/PPM
@@ -96,11 +164,23 @@ void VerticallyFlipImage(float* const float_image, const size_t xsize,
 
 }  // namespace
 
+std::unique_ptr<Encoder> GetPPMEncoder() {
+  return jxl::make_unique<PPMEncoder>();
+}
+
+std::unique_ptr<Encoder> GetPFMEncoder() {
+  return jxl::make_unique<PFMEncoder>();
+}
+
+std::unique_ptr<Encoder> GetPGMEncoder() {
+  return jxl::make_unique<PGMEncoder>();
+}
+
 Status EncodeImagePNM(const PackedPixelFile& ppf, size_t bits_per_sample,
                       ThreadPool* pool, size_t frame_index,
                       std::vector<uint8_t>* bytes) {
   const bool floating_point = bits_per_sample > 16;
-  // Choose native for PFM; PGM/PPM require big-endian (N/A for PBM)
+  // Choose native for PFM; PGM/PPM require big-endian
   const JxlEndianness endianness =
       floating_point ? JXL_NATIVE_ENDIAN : JXL_BIG_ENDIAN;
   if (!ppf.metadata.exif.empty() || !ppf.metadata.iptc.empty() ||

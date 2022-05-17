@@ -41,22 +41,6 @@ FUZZER_MAX_TIME="${FUZZER_MAX_TIME:-0}"
 
 SANITIZER="none"
 
-if [[ "${BUILD_TARGET}" == wasm* ]]; then
-  # Check that environment is setup for the WASM build target.
-  if [[ -z "${EMSCRIPTEN}" ]]; then
-    echo "'EMSCRIPTEN' is not defined. Use 'emconfigure' wrapper to setup WASM build environment" >&2
-    return 1
-  fi
-  # Remove the side-effect of "emconfigure" wrapper - it considers NodeJS environment.
-  unset EMMAKEN_JUST_CONFIGURE
-  EMS_TOOLCHAIN_FILE="${EMSCRIPTEN}/cmake/Modules/Platform/Emscripten.cmake"
-  if [[ -f "${EMS_TOOLCHAIN_FILE}" ]]; then
-    CMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE:-${EMS_TOOLCHAIN_FILE}}
-  else
-    echo "Warning: EMSCRIPTEN CMake module not found" >&2
-  fi
-  CMAKE_CROSSCOMPILING_EMULATOR="${MYDIR}/js-wasm-wrapper.sh"
-fi
 
 if [[ "${BUILD_TARGET%%-*}" == "x86_64" ||
     "${BUILD_TARGET%%-*}" == "i686" ]]; then
@@ -350,7 +334,6 @@ cmake_configure() {
     -G Ninja
     -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}"
     -DCMAKE_C_FLAGS="${CMAKE_C_FLAGS}"
-    -DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN_FILE}"
     -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}"
     -DCMAKE_MODULE_LINKER_FLAGS="${CMAKE_MODULE_LINKER_FLAGS}"
     -DCMAKE_SHARED_LINKER_FLAGS="${CMAKE_SHARED_LINKER_FLAGS}"
@@ -392,11 +375,14 @@ cmake_configure() {
         # Only the first element of the target triplet.
         -DCMAKE_SYSTEM_PROCESSOR="${BUILD_TARGET%%-*}"
         -DCMAKE_SYSTEM_NAME="${system_name}"
+        -DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN_FILE}"
       )
     else
-      # sjpeg confuses WASM SIMD with SSE.
       args+=(
+        # sjpeg confuses WASM SIMD with SSE.
         -DSJPEG_ENABLE_SIMD=OFF
+        # Building shared libs is not very useful for WASM.
+        -DBUILD_SHARED_LIBS=OFF
       )
     fi
     args+=(
@@ -457,7 +443,11 @@ cmake_configure() {
       -DCMAKE_MAKE_PROGRAM="${CMAKE_MAKE_PROGRAM}"
     )
   fi
-  cmake "${args[@]}" "$@"
+  if [[ "${BUILD_TARGET}" == wasm* ]]; then
+    emcmake cmake "${args[@]}" "$@"
+  else
+    cmake "${args[@]}" "$@"
+  fi
 }
 
 cmake_build_and_test() {
@@ -494,7 +484,7 @@ cmake_build_and_test() {
 # library.
 strip_dead_code() {
   # Emscripten does tree shaking without any extra flags.
-  if [[ "${CMAKE_TOOLCHAIN_FILE##*/}" == "Emscripten.cmake" ]]; then
+  if [[ "${BUILD_TARGET}" == wasm* ]]; then
     return 0
   fi
   # -ffunction-sections, -fdata-sections and -Wl,--gc-sections effectively
@@ -905,7 +895,7 @@ run_benchmark() {
 
   local benchmark_args=(
     --input "${src_img_dir}/*.png"
-    --codec=jpeg:yuv420:q85,webp:q80,jxl:fast:d1,jxl:fast:d1:downsampling=8,jxl:fast:d4,jxl:fast:d4:downsampling=8,jxl:cheetah:m,jxl:m:cheetah:P6,jxl:m:falcon:q80
+    --codec=jpeg:yuv420:q85,webp:q80,jxl:d1:6,jxl:d1:6:downsampling=8,jxl:d5:6,jxl:d5:6:downsampling=8,jxl:m:d0:2,jxl:m:d0:3,jxl:m:d2:2
     --output_dir "${output_dir}"
     --noprofiler --show_progress
     --num_threads="${num_threads}"
@@ -1020,11 +1010,11 @@ cmd_arm_benchmark() {
   )
 
   local images=(
-    "third_party/testdata/imagecompression.info/flower_foveon.png"
+    "testdata/jxl/flower/flower.png"
   )
 
   local jpg_images=(
-    "third_party/testdata/imagecompression.info/flower_foveon.png.im_q85_420.jpg"
+    "testdata/jxl/flower/flower.png.im_q85_420.jpg"
   )
 
   if [[ "${SKIP_CPUSET:-}" == "1" ]]; then

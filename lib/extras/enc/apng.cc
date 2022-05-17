@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "jxl/encode.h"
+#include "lib/extras/packed_image_convert.h"
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/base/printf_macros.h"
 #include "lib/jxl/color_encoding_internal.h"
@@ -61,9 +62,38 @@ namespace extras {
 
 namespace {
 
+class APNGEncoder : public Encoder {
+ public:
+  std::vector<JxlPixelFormat> AcceptedFormats() const override {
+    std::vector<JxlPixelFormat> formats;
+    for (const uint32_t num_channels : {1, 2, 3, 4}) {
+      for (const JxlDataType data_type : {JXL_TYPE_UINT8, JXL_TYPE_UINT16}) {
+        for (JxlEndianness endianness : {JXL_BIG_ENDIAN, JXL_LITTLE_ENDIAN}) {
+          formats.push_back(JxlPixelFormat{/*num_channels=*/num_channels,
+                                           /*data_type=*/data_type,
+                                           /*endianness=*/endianness,
+                                           /*align=*/0});
+        }
+      }
+    }
+    return formats;
+  }
+  Status Encode(const PackedPixelFile& ppf, EncodedImage* encoded_image,
+                ThreadPool* pool) const override {
+    encoded_image->icc.clear();
+    encoded_image->bitstreams.resize(1);
+    CodecInOut io;
+    JXL_RETURN_IF_ERROR(ConvertPackedPixelFileToCodecInOut(ppf, pool, &io));
+    return EncodeImageAPNG(&io, io.metadata.m.color_encoding,
+                           ppf.info.bits_per_sample, pool,
+                           &encoded_image->bitstreams.front());
+  }
+};
+
 static void PngWrite(png_structp png_ptr, png_bytep data, png_size_t length) {
-  PaddedBytes* bytes = static_cast<PaddedBytes*>(png_get_io_ptr(png_ptr));
-  bytes->append(data, data + length);
+  std::vector<uint8_t>* bytes =
+      static_cast<std::vector<uint8_t>*>(png_get_io_ptr(png_ptr));
+  bytes->insert(bytes->end(), data, data + length);
 }
 
 // Stores XMP and EXIF/IPTC into key/value strings for PNG
@@ -124,9 +154,13 @@ class BlobsWriterPNG {
 
 }  // namespace
 
+std::unique_ptr<Encoder> GetAPNGEncoder() {
+  return jxl::make_unique<APNGEncoder>();
+}
+
 Status EncodeImageAPNG(const CodecInOut* io, const ColorEncoding& c_desired,
                        size_t bits_per_sample, ThreadPool* pool,
-                       PaddedBytes* bytes) {
+                       std::vector<uint8_t>* bytes) {
   if (bits_per_sample > 8) {
     bits_per_sample = 16;
   } else if (bits_per_sample < 8) {
@@ -169,8 +203,8 @@ Status EncodeImageAPNG(const CodecInOut* io, const ColorEncoding& c_desired,
     JXL_RETURN_IF_ERROR(ConvertToExternal(
         *transformed, bits_per_sample, /*float_out=*/false,
         c_desired.Channels() + (ib.HasAlpha() ? 1 : 0), JXL_BIG_ENDIAN, stride,
-        pool, raw_bytes.data(), raw_bytes.size(), /*out_callback=*/nullptr,
-        /*out_opaque=*/nullptr, metadata.GetOrientation()));
+        pool, raw_bytes.data(), raw_bytes.size(),
+        /*out_callback=*/{}, metadata.GetOrientation()));
 
     int width = ib.oriented_xsize();
     int height = ib.oriented_ysize();
@@ -195,10 +229,10 @@ Status EncodeImageAPNG(const CodecInOut* io, const ColorEncoding& c_desired,
 
       std::vector<std::string> textstrings;
       JXL_RETURN_IF_ERROR(BlobsWriterPNG::Encode(io->blobs, &textstrings));
-      for (size_t i = 0; i + 1 < textstrings.size(); i += 2) {
+      for (size_t kk = 0; kk + 1 < textstrings.size(); kk += 2) {
         png_text text;
-        text.key = const_cast<png_charp>(textstrings[i].c_str());
-        text.text = const_cast<png_charp>(textstrings[i + 1].c_str());
+        text.key = const_cast<png_charp>(textstrings[kk].c_str());
+        text.text = const_cast<png_charp>(textstrings[kk + 1].c_str());
         text.compression = PNG_TEXT_COMPRESSION_zTXt;
         png_set_text(png_ptr, info_ptr, &text, 1);
       }

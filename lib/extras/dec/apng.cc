@@ -57,6 +57,12 @@ namespace extras {
 
 namespace {
 
+/* hIST chunk tail is not proccesed properly; skip this chunk completely;
+   see https://github.com/glennrp/libpng/pull/413 */
+const png_byte kIgnoredPngChunks[] = {
+    104, 73, 83, 84, '\0' /* hIST */
+};
+
 // Returns floating-point value from the PNG encoding (times 10^5).
 static double F64FromU32(const uint32_t x) {
   return static_cast<int32_t>(x) * 1E-5;
@@ -164,6 +170,31 @@ class BlobsReaderPNG {
     return true;
   }
 
+  // Returns false if invalid.
+  static JXL_INLINE Status DecodeDecimal(const char** pos, const char* end,
+                                         uint32_t* JXL_RESTRICT value) {
+    size_t len = 0;
+    *value = 0;
+    while (*pos < end) {
+      char next = **pos;
+      if (next >= '0' && next <= '9') {
+        *value = (*value * 10) + static_cast<uint32_t>(next - '0');
+        len++;
+        if (len > 8) {
+          break;
+        }
+      } else {
+        // Do not consume terminator (non-decimal digit).
+        break;
+      }
+      (*pos)++;
+    }
+    if (len == 0 || len > 8) {
+      return JXL_FAILURE("Failed to parse decimal");
+    }
+    return true;
+  }
+
   // Parses a PNG text chunk with key of the form "Raw profile type ####", with
   // #### a type.
   // Returns whether it could successfully parse the content.
@@ -197,17 +228,15 @@ class BlobsReaderPNG {
     // We parsed so far a \n, some number of non \n characters and are now
     // pointing at a \n.
     if (*(pos++) != '\n') return false;
-    unsigned long bytes_to_decode;
-    const int fields = sscanf(pos, "%8lu", &bytes_to_decode);
-    if (fields != 1) return false;  // Failed to decode metadata header
-    JXL_ASSERT(pos + 8 <= encoded_end);
-    pos += 8;  // read %8lu
+    uint32_t bytes_to_decode = 0;
+    JXL_RETURN_IF_ERROR(DecodeDecimal(&pos, encoded_end, &bytes_to_decode));
 
-    // We need 2*bytes for the hex values plus 1 byte every 36 values.
+    // We need 2*bytes for the hex values plus 1 byte every 36 values,
+    // plus terminal \n for length.
     const unsigned long needed_bytes =
         bytes_to_decode * 2 + 1 + DivCeil(bytes_to_decode, 36);
     if (needed_bytes != static_cast<size_t>(encoded_end - pos)) {
-      return JXL_FAILURE("Not enough bytes to parse %lu bytes in hex",
+      return JXL_FAILURE("Not enough bytes to parse %d bytes in hex",
                          bytes_to_decode);
     }
     JXL_ASSERT(bytes->empty());
@@ -271,7 +300,7 @@ struct Reader {
 };
 
 const unsigned long cMaxPNGSize = 1000000UL;
-const size_t kMaxPNGChunkSize = 100000000;  // 100 MB
+const size_t kMaxPNGChunkSize = 1lu << 30;  // 1 GB
 
 void info_fn(png_structp png_ptr, png_infop info_ptr) {
   png_set_expand(png_ptr);
@@ -285,6 +314,7 @@ void row_fn(png_structp png_ptr, png_bytep new_row, png_uint_32 row_num,
             int pass) {
   APNGFrame* frame = (APNGFrame*)png_get_progressive_ptr(png_ptr);
   JXL_CHECK(frame);
+  JXL_CHECK(row_num < frame->rows.size());
   JXL_CHECK(frame->rows[row_num] < frame->pixels.data() + frame->pixels.size());
   png_progressive_combine_row(png_ptr, frame->rows[row_num], new_row);
 }
@@ -319,6 +349,9 @@ int processing_start(png_structp& png_ptr, png_infop& info_ptr, void* frame_ptr,
   if (setjmp(png_jmpbuf(png_ptr))) {
     return 1;
   }
+
+  png_set_keep_unknown_chunks(png_ptr, 1, kIgnoredPngChunks,
+                              (int)sizeof(kIgnoredPngChunks) / 5);
 
   png_set_crc_action(png_ptr, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
   png_set_progressive_read_fn(png_ptr, frame_ptr, info_fn, row_fn, NULL);

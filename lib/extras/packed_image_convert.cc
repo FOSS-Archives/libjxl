@@ -65,6 +65,11 @@ Status ConvertPackedPixelFileToCodecInOut(const PackedPixelFile& ppf,
     if (!io->metadata.m.color_encoding.SetICC(std::move(icc))) {
       fprintf(stderr, "Warning: error setting ICC profile, assuming SRGB");
       io->metadata.m.color_encoding = ColorEncoding::SRGB(is_gray);
+    } else {
+      if (io->metadata.m.color_encoding.IsGray() != is_gray) {
+        // E.g. JPG image has 3 channels, but gray ICC.
+        return JXL_FAILURE("Embedded ICC does not match image color type");
+      }
     }
   } else {
     JXL_RETURN_IF_ERROR(ConvertExternalToInternalColorEncoding(
@@ -244,8 +249,11 @@ Status ConvertCodecInOutToPackedPixelFile(const CodecInOut& io,
 
     PackedFrame packed_frame(frame.oriented_xsize(), frame.oriented_ysize(),
                              format);
+    packed_frame.color.bitdepth_from_format = float_out;
     const size_t bits_per_sample =
-        packed_frame.color.BitsPerChannel(pixel_format.data_type);
+        packed_frame.color.bitdepth_from_format
+            ? packed_frame.color.BitsPerChannel(pixel_format.data_type)
+            : ppf->info.bits_per_sample;
     packed_frame.name = frame.name;
     packed_frame.frame_info.name_length = frame.name.size();
     // Color transform
@@ -268,8 +276,7 @@ Status ConvertCodecInOutToPackedPixelFile(const CodecInOut& io,
         format.endianness,
         /* stride_out=*/packed_frame.color.stride, pool,
         packed_frame.color.pixels(), packed_frame.color.pixels_size,
-        /*out_callback=*/nullptr, /*out_opaque=*/nullptr,
-        frame.metadata()->GetOrientation()));
+        /*out_callback=*/{}, frame.metadata()->GetOrientation()));
 
     // TODO(firsching): Convert the extra channels, beside one potential alpha
     // channel. FIXME!

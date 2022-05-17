@@ -52,7 +52,7 @@ Status SetFromBytes(const Span<const uint8_t> bytes,
 Status SetFromFile(const std::string& pathname,
                    const extras::ColorHints& color_hints, CodecInOut* io,
                    ThreadPool* pool, extras::Codec* orig_codec) {
-  PaddedBytes encoded;
+  std::vector<uint8_t> encoded;
   JXL_RETURN_IF_ERROR(ReadFile(pathname, &encoded));
   JXL_RETURN_IF_ERROR(SetFromBytes(Span<const uint8_t>(encoded), color_hints,
                                    io, pool, orig_codec));
@@ -61,7 +61,7 @@ Status SetFromFile(const std::string& pathname,
 
 Status Encode(const CodecInOut& io, const extras::Codec codec,
               const ColorEncoding& c_desired, size_t bits_per_sample,
-              PaddedBytes* bytes, ThreadPool* pool) {
+              std::vector<uint8_t>* bytes, ThreadPool* pool) {
   JXL_CHECK(!io.Main().c_current().ICC().empty());
   JXL_CHECK(!c_desired.ICC().empty());
   io.CheckMetadata();
@@ -139,10 +139,13 @@ Status EncodeToFile(const CodecInOut& io, const ColorEncoding& c_desired,
   const extras::Codec codec =
       extras::CodecFromExtension(extension, &bits_per_sample);
 
-  // Warn about incorrect usage of PBM/PGM/PGX/PPM - only the latter supports
+  // Warn about incorrect usage of PGM/PGX/PPM - only the latter supports
   // color, but CodecFromExtension lumps them all together.
   if (codec == extras::Codec::kPNM && extension != ".pfm") {
-    if (!io.Main().IsGray() && extension != ".ppm") {
+    if (io.Main().HasAlpha() && extension != ".pam") {
+      JXL_WARNING(
+          "For images with alpha, the filename should end with .pam.\n");
+    } else if (!io.Main().IsGray() && extension == ".pgm") {
       JXL_WARNING("For color images, the filename should end with .ppm.\n");
     } else if (io.Main().IsGray() && extension == ".ppm") {
       JXL_WARNING(
@@ -160,7 +163,7 @@ Status EncodeToFile(const CodecInOut& io, const ColorEncoding& c_desired,
     bits_per_sample = 16;
   }
 
-  PaddedBytes encoded;
+  std::vector<uint8_t> encoded;
   return Encode(io, codec, c_desired, bits_per_sample, &encoded, pool) &&
          WriteFile(encoded, pathname);
 }

@@ -31,7 +31,10 @@ enum class RenderPipelineChannelMode {
   kInPlace = 1,
   // This channel is modified and written to a new buffer.
   kInOut = 2,
-  // This channel is only read.
+  // This channel is only read. These are the only stages that are assumed to
+  // have observable effects, i.e. calls to ProcessRow for other stages may be
+  // omitted if it can be shown they can't affect any kInput stage ProcessRow
+  // call that happens inside image boundaries.
   kInput = 3,
 };
 
@@ -55,10 +58,6 @@ class RenderPipelineStage {
     size_t shift_x = 0;
     size_t shift_y = 0;
 
-    // Size (in floats) of the (aligned) per-thread temporary buffer to pass to
-    // ProcessRow.
-    size_t temp_buffer_size = 0;
-
     static Settings ShiftX(size_t shift, size_t border) {
       Settings settings;
       settings.border_x = border;
@@ -73,8 +72,7 @@ class RenderPipelineStage {
       return settings;
     }
 
-    static Settings Symmetric(size_t shift, size_t border,
-                              size_t temp_buffer_size = 0) {
+    static Settings Symmetric(size_t shift, size_t border) {
       Settings settings;
       settings.border_x = settings.border_y = border;
       settings.shift_x = settings.shift_y = shift;
@@ -103,7 +101,11 @@ class RenderPipelineStage {
   // of floats; concurrent calls will have different buffers.
   virtual void ProcessRow(const RowInfo& input_rows, const RowInfo& output_rows,
                           size_t xextra, size_t xsize, size_t xpos, size_t ypos,
-                          float* JXL_RESTRICT temp) const = 0;
+                          size_t thread_id) const = 0;
+
+  // How each channel will be processed. Channels are numbered starting from
+  // color channels (always 3) and followed by all other channels.
+  virtual RenderPipelineChannelMode GetChannelMode(size_t c) const = 0;
 
  protected:
   explicit RenderPipelineStage(Settings settings) : settings_(settings) {}
@@ -115,9 +117,7 @@ class RenderPipelineStage {
   virtual void SetInputSizes(
       const std::vector<std::pair<size_t, size_t>>& input_sizes) {}
 
-  // How each channel will be processed. Channels are numbered starting from
-  // color channels (always 3) and followed by all other channels.
-  virtual RenderPipelineChannelMode GetChannelMode(size_t c) const = 0;
+  virtual Status PrepareForThreads(size_t num_threads) { return true; }
 
   // Returns a pointer to the input row of channel `c` with offset `y`.
   // `y` must be in [-settings_.border_y, settings_.border_y]. `c` must be such
@@ -143,6 +143,8 @@ class RenderPipelineStage {
   // Indicates whether, from this stage on, the pipeline will operate on an
   // image- rather than frame-sized buffer. Only one stage in the pipeline
   // should return true, and it should implement ProcessPaddingRow below too.
+  // It is assumed that, if there is a SwitchToImageDimensions() == true stage,
+  // all kInput stages appear after it.
   virtual bool SwitchToImageDimensions() const { return false; }
 
   // If SwitchToImageDimensions returns true, then this should set xsize and

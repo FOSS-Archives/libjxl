@@ -234,6 +234,12 @@ if(JPEGXL_STATIC)
   endif()
 endif()  # JPEGXL_STATIC
 
+if (JPEGXL_EMSCRIPTEN)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pthread")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
+endif()
+
 if ("${CXX_MACRO_PREFIX_MAP}")
   add_compile_options(-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.)
 endif()
@@ -316,6 +322,10 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
 # Enable tests regardless of where they are defined.
 enable_testing()
 include(CTest)
+# Specify default location of `testdata`:
+if(NOT DEFINED JPEGXL_TEST_DATA_PATH)
+  set(JPEGXL_TEST_DATA_PATH "${PROJECT_SOURCE_DIR}/testdata")
+endif()
 
 # Libraries.
 add_subdirectory(lib)

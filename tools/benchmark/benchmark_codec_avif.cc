@@ -213,7 +213,7 @@ class AvifCodec : public ImageCodec {
   }
 
   Status Compress(const std::string& filename, const CodecInOut* io,
-                  ThreadPoolInternal* pool, PaddedBytes* compressed,
+                  ThreadPoolInternal* pool, std::vector<uint8_t>* compressed,
                   jpegxl::tools::SpeedStats* speed_stats) override {
     double elapsed_convert_image = 0;
     const double start = Now();
@@ -264,8 +264,7 @@ class AvifCodec : public ImageCodec {
             /*num_channels=*/ib.HasAlpha() ? 4 : 3, JXL_NATIVE_ENDIAN,
             /*stride=*/rgb_image.rowBytes, pool, rgb_image.pixels,
             rgb_image.rowBytes * rgb_image.height,
-            /*out_callback=*/nullptr, /*out_opaque=*/nullptr,
-            jxl::Orientation::kIdentity));
+            /*out_callback=*/{}, jxl::Orientation::kIdentity));
         const double end_convert_image = Now();
         elapsed_convert_image += end_convert_image - start_convert_image;
         JXL_RETURN_IF_AVIF_ERROR(avifImageRGBToYUV(image.get(), &rgb_image));

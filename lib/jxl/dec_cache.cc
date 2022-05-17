@@ -89,7 +89,9 @@ Status PassesDecoderState::PreparePipeline(ImageBundle* decoded,
   }
 
   if ((frame_header.flags & FrameHeader::kPatches) != 0) {
-    builder.AddStage(GetPatchesStage(&shared->image_features.patches));
+    builder.AddStage(
+        GetPatchesStage(&shared->image_features.patches,
+                        3 + shared->metadata->m.num_extra_channels));
   }
   if ((frame_header.flags & FrameHeader::kSplines) != 0) {
     builder.AddStage(GetSplineStage(&shared->image_features.splines));
@@ -180,12 +182,12 @@ Status PassesDecoderState::PreparePipeline(ImageBundle* decoded,
       }
     }
 
-    if (pixel_callback) {
+    if (pixel_callback.IsPresent()) {
       builder.AddStage(GetWriteToPixelCallbackStage(pixel_callback, width,
                                                     height, rgb_output_is_rgba,
                                                     has_alpha, alpha_c));
     } else if (rgb_output) {
-      builder.AddStage(GetWriteToU8Stage(rgb_output, rgb_stride, width, height,
+      builder.AddStage(GetWriteToU8Stage(rgb_output, rgb_stride, height,
                                          rgb_output_is_rgba, has_alpha,
                                          alpha_c));
     } else {

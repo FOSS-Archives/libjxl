@@ -46,7 +46,7 @@ jobs:
           # Build scalar-only hwy instructions.
           - name: scalar
             mode: release
-            cxxflags: -DHWY_DISABLED_TARGETS=~HWY_SCALAR
+            cxxflags: -DHWY_COMPILE_ONLY_SCALAR
           # Disabling optional features to speed up msan build a little bit.
           - name: msan
             skip_install: true
@@ -59,8 +59,6 @@ jobs:
             apt_pkgs: gcovr
             # Coverage builds require a bit more RAM.
             env_test_stack_size: 2048
-            # Exclude roundtrip tests from the unittest coverage.
-            ctest_args: -E '^JxlTest'
           # Build with support for decoding to JPEG bytes disabled. Produces a
           # smaller build if only decoding to pixels is needed.
           - name: release-nojpeg
@@ -149,6 +147,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-${{ steps.git-env.outputs.parent }}-${{ matrix.name }}
     - name: Build
+      if: matrix.name != 'coverage' || env.WILL_RUN_TESTS == 'true'
       run: |
         mkdir -p ${CCACHE_DIR}
         echo "max_size = 200M" > ${CCACHE_DIR}/ccache.conf
@@ -216,10 +215,10 @@ jobs:
         files: build/coverage.xml
     - name: Fast benchmark ${{ matrix.mode }}
       if: |
-        github.event_name == 'push' ||
+        matrix.name != 'coverage' && (github.event_name == 'push' ||
         (github.event_name == 'pull_request' && (
          matrix.test_in_pr ||
-         contains(github.event.pull_request.labels.*.names, 'CI:full')))
+         contains(github.event.pull_request.labels.*.names, 'CI:full'))))
       run: |
         STORE_IMAGES=0 ./ci.sh fast_benchmark
     # Run gbench once, just to make sure it runs, not for actual benchmarking.
@@ -456,10 +455,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      EM_VERSION: 3.1.4
-      V8_VERSION: 9.8.177
-      V8: ${{ github.workspace }}/.jsvu/v8
       BUILD_TARGET: wasm32
+      EM_VERSION: 3.1.1
+      NODE_VERSION: 18
 
     strategy:
       matrix:
@@ -500,6 +498,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-${{ steps.git-env.outputs.parent }}-${{ matrix.variant }}
 
+    - name: Install node
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{env.NODE_VERSION}}
+
+    - name: Get non-EMSDK node path
+      run: which node >> $HOME/.base_node_path
+
     - name: Install emsdk
       uses: mymindstorm/setup-emsdk@v11
       # TODO(deymo): We could cache this action but it doesn't work when running
@@ -507,13 +513,12 @@ jobs:
       with:
         version: ${{env.EM_VERSION}}
         no-cache: true
-    - name: Install v8
+
+    - name: Set EMSDK node version
       run: |
-        npm install jsvu -g
-        HOME="${{ github.workspace }}" jsvu --os=linux64 "v8@${V8_VERSION}"
-        rm -f "${{ github.workspace }}/.jsvu/v8"
-        ln -s "${{ github.workspace }}/.jsvu/v8-${V8_VERSION}" \
-          "${{ github.workspace }}/.jsvu/v8"
+        echo "NODE_JS='$(cat $HOME/.base_node_path)'" >> $EM_CONFIG
+        emsdk construct_env
+
     # TODO(deymo): Build and install other dependencies like libpng, libjpeg,
     # etc.
     - name: Build
@@ -523,12 +528,9 @@ jobs:
         if [[ "${{ matrix.variant }}" == "simd" ]]; then
           export ENABLE_WASM_SIMD=1
         fi
-        emconfigure ./ci.sh release \
+        ./ci.sh release \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-          -DBUILD_SHARED_LIBS=OFF \
-          -DJPEGXL_ENABLE_JNI=OFF
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
       env:
         SKIP_TEST: 1
     - name: ccache stats
@@ -540,4 +542,4 @@ jobs:
         (github.event_name == 'pull_request' &&
          contains(github.event.pull_request.labels.*.names, 'CI:full'))
       run: |
-        emconfigure ./ci.sh test
+        ./ci.sh test
