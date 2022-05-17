@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include <array>
-#include <atomic>
 #include <limits>
 #include <queue>
 #include <utility>

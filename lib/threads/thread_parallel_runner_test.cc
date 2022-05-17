@@ -3,8 +3,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include <atomic>
-
 #include "gtest/gtest.h"
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/thread_pool_internal.h"
