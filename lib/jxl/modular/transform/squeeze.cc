@@ -23,7 +23,6 @@ HWY_BEFORE_NAMESPACE();
 namespace jxl {
 namespace HWY_NAMESPACE {
 
-using hwy::HWY_NAMESPACE::RebindToUnsigned;
 using hwy::HWY_NAMESPACE::ShiftLeft;
 using hwy::HWY_NAMESPACE::ShiftRight;
 
@@ -36,7 +35,6 @@ JXL_INLINE void FastUnsqueeze(const pixel_type *JXL_RESTRICT p_residual,
                               pixel_type *JXL_RESTRICT p_out,
                               pixel_type *p_nout) {
   const HWY_CAPPED(pixel_type, 8) d;
-  const RebindToUnsigned<decltype(d)> du;
   const size_t N = Lanes(d);
   auto onethird = Set(d, 0x55555556);
   for (size_t x = 0; x < 8; x += N) {
@@ -73,8 +71,9 @@ JXL_INLINE void FastUnsqueeze(const pixel_type *JXL_RESTRICT p_residual,
 
     auto diff_minus_tendency = Load(d, p_residual + x);
     auto diff = diff_minus_tendency + tendency;
-    auto out = avg + ShiftRight<1>(
-                         diff + BitCast(d, ShiftRight<31>(BitCast(du, diff))));
+    auto out = ShiftRight<1>(
+        ShiftLeft<1>(avg) + diff +
+        IfThenElse(diff < Zero(d), (diff & Set(d, 1)), Neg(diff & Set(d, 1))));
     Store(out, d, p_out + x);
     Store(out - diff, d, p_nout + x);
   }
