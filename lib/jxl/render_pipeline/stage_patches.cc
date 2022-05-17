@@ -9,10 +9,9 @@ namespace jxl {
 namespace {
 class PatchDictionaryStage : public RenderPipelineStage {
  public:
-  PatchDictionaryStage(const PatchDictionary* patches, size_t num_channels)
+  explicit PatchDictionaryStage(const PatchDictionary* patches)
       : RenderPipelineStage(RenderPipelineStage::Settings()),
-        patches_(*patches),
-        num_channels_(num_channels) {}
+        patches_(*patches) {}
 
   void ProcessRow(const RowInfo& input_rows, const RowInfo& output_rows,
                   size_t xextra, size_t xsize, size_t xpos, size_t ypos,
@@ -20,29 +19,27 @@ class PatchDictionaryStage : public RenderPipelineStage {
     PROFILER_ZONE("RenderPatches");
     JXL_ASSERT(xpos == 0 || xpos >= xextra);
     size_t x0 = xpos ? xpos - xextra : 0;
-    std::vector<float*> row_ptrs(num_channels_);
-    for (size_t i = 0; i < num_channels_; i++) {
+    std::vector<float*> row_ptrs(input_rows.size());
+    for (size_t i = 0; i < row_ptrs.size(); i++) {
       row_ptrs[i] = GetInputRow(input_rows, i, 0) + x0 - xpos;
     }
     patches_.AddOneRow(row_ptrs.data(), ypos, x0, xsize + xextra + xpos - x0);
   }
 
   RenderPipelineChannelMode GetChannelMode(size_t c) const final {
-    return c < num_channels_ ? RenderPipelineChannelMode::kInPlace
-                             : RenderPipelineChannelMode::kIgnored;
+    return RenderPipelineChannelMode::kInPlace;
   }
 
   const char* GetName() const override { return "Patches"; }
 
  private:
   const PatchDictionary& patches_;
-  const size_t num_channels_;
 };
 }  // namespace
 
 std::unique_ptr<RenderPipelineStage> GetPatchesStage(
-    const PatchDictionary* patches, size_t num_channels) {
-  return jxl::make_unique<PatchDictionaryStage>(patches, num_channels);
+    const PatchDictionary* patches) {
+  return jxl::make_unique<PatchDictionaryStage>(patches);
 }
 
 }  // namespace jxl
