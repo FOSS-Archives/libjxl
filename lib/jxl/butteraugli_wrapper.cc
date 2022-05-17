@@ -116,10 +116,9 @@ void JxlButteraugliApiSetIntensityTarget(JxlButteraugliApi* api, float v) {
 
 void JxlButteraugliApiDestroy(JxlButteraugliApi* api) {
   if (api) {
-    JxlMemoryManager local_memory_manager = api->memory_manager;
     // Call destructor directly since custom free function is used.
     api->~JxlButteraugliApi();
-    jxl::MemoryManagerFree(&local_memory_manager, api);
+    jxl::MemoryManagerFree(&api->memory_manager, api);
   }
 }
 
@@ -201,9 +200,8 @@ float JxlButteraugliResultGetMaxDistance(const JxlButteraugliResult* result) {
 
 void JxlButteraugliResultDestroy(JxlButteraugliResult* result) {
   if (result) {
-    JxlMemoryManager local_memory_manager = result->memory_manager;
     // Call destructor directly since custom free function is used.
     result->~JxlButteraugliResult();
-    jxl::MemoryManagerFree(&local_memory_manager, result);
+    jxl::MemoryManagerFree(&result->memory_manager, result);
   }
 }

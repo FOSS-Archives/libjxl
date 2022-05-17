@@ -88,10 +88,9 @@ void JxlThreadParallelRunnerDestroy(void* runner_opaque) {
   jpegxl::ThreadParallelRunner* runner =
       reinterpret_cast<jpegxl::ThreadParallelRunner*>(runner_opaque);
   if (runner) {
-    JxlMemoryManager local_memory_manager = runner->memory_manager;
     // Call destructor directly since custom free function is used.
     runner->~ThreadParallelRunner();
-    ThreadMemoryManagerFree(&local_memory_manager, runner);
+    ThreadMemoryManagerFree(&runner->memory_manager, runner);
   }
 }
 
