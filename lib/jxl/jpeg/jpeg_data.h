@@ -105,7 +105,6 @@ enum struct JPEGReadError {
   EOB_RUN_TOO_LONG,
   IMAGE_TOO_LARGE,
   INVALID_QUANT_TBL_PRECISION,
-  TAIL_DATA_TOO_LARGE
 };
 
 // Quantization values for an 8x8 pixel block.
