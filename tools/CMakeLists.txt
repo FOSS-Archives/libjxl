@@ -121,7 +121,6 @@ endif()
 if(JPEGXL_ENABLE_TOOLS)
   list(APPEND TOOL_BINARIES
     cjxl
-    cjxl_ng
     djxl
     djxl_ng
     cjpeg_hdr
