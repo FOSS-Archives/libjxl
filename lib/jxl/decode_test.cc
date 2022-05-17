@@ -203,7 +203,7 @@ PaddedBytes CreateTestJXLCodestream(
   jxl::PaddedBytes jpeg_data;
   if (jpeg_codestream != nullptr) {
 #if JPEGXL_ENABLE_JPEG
-    std::vector<uint8_t> jpeg_bytes;
+    jxl::PaddedBytes jpeg_bytes;
     EXPECT_TRUE(EncodeImageJPG(&io, jxl::extras::JpegEncoder::kLibJpeg,
                                /*quality=*/70, jxl::YCbCrChromaSubsampling(),
                                &pool, &jpeg_bytes));

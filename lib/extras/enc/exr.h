@@ -8,7 +8,6 @@
 
 // Encodes OpenEXR images in memory.
 
-#include "lib/extras/enc/encode.h"
 #include "lib/extras/packed_image.h"
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/padded_bytes.h"
@@ -20,12 +19,10 @@
 namespace jxl {
 namespace extras {
 
-std::unique_ptr<Encoder> GetEXREncoder();
-
 // Transforms from io->c_current to `c_desired` (with the transfer function set
 // to linear as that is the OpenEXR convention) and encodes into `bytes`.
 Status EncodeImageEXR(const CodecInOut* io, const ColorEncoding& c_desired,
-                      ThreadPool* pool, std::vector<uint8_t>* bytes);
+                      ThreadPool* pool, PaddedBytes* bytes);
 
 }  // namespace extras
 }  // namespace jxl

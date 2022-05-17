@@ -59,8 +59,7 @@ class ImageCodec {
   virtual bool IsJpegTranscoder() const { return false; }
 
   virtual Status Compress(const std::string& filename, const CodecInOut* io,
-                          ThreadPoolInternal* pool,
-                          std::vector<uint8_t>* compressed,
+                          ThreadPoolInternal* pool, PaddedBytes* compressed,
                           jpegxl::tools::SpeedStats* speed_stats) = 0;
 
   virtual Status Decompress(const std::string& filename,
@@ -73,7 +72,7 @@ class ImageCodec {
   virtual Status CanRecompressJpeg() const { return false; }
   virtual Status RecompressJpeg(const std::string& filename,
                                 const std::string& data,
-                                std::vector<uint8_t>* compressed,
+                                PaddedBytes* compressed,
                                 jpegxl::tools::SpeedStats* speed_stats) {
     return false;
   }

@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 
-#include "lib/extras/enc/encode.h"
+#include "lib/extras/codec.h"
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/padded_bytes.h"
 #include "lib/jxl/base/span.h"
@@ -25,12 +25,10 @@ enum class JpegEncoder {
   kSJpeg,
 };
 
-std::unique_ptr<Encoder> GetJPEGEncoder();
-
 // Encodes into `bytes`.
 Status EncodeImageJPG(const CodecInOut* io, JpegEncoder encoder, size_t quality,
                       YCbCrChromaSubsampling chroma_subsampling,
-                      ThreadPool* pool, std::vector<uint8_t>* bytes);
+                      ThreadPool* pool, PaddedBytes* bytes);
 
 }  // namespace extras
 }  // namespace jxl
