@@ -12,13 +12,8 @@
 #include <unordered_map>
 
 #include "lib/extras/dec/decode.h"
-#include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/base/data_parallel.h"
-#include "lib/jxl/base/padded_bytes.h"
-#include "lib/jxl/base/span.h"
 #include "lib/jxl/base/status.h"
-#include "lib/jxl/codec_in_out.h"
-#include "lib/jxl/field_encodings.h"  // MakeBit
 
 namespace jxl {
 namespace extras {
@@ -28,10 +23,18 @@ struct EncodedImage {
   // more sequential bitstreams.
   std::vector<std::vector<uint8_t>> bitstreams;
 
+  // For each extra channel one or more sequential bitstreams.
+  std::vector<std::vector<std::vector<uint8_t>>> extra_channel_bitstreams;
+
+  std::vector<uint8_t> preview_bitstream;
+
   // If the format does not support embedding color profiles into the bitstreams
   // above, it will be present here, to be written as a separate file. If it
   // does support them, this field will be empty.
   std::vector<uint8_t> icc;
+
+  // Additional output for conformance testing, only filled in by NumPyEncoder.
+  std::vector<uint8_t> metadata;
 };
 
 class Encoder {
@@ -54,6 +57,16 @@ class Encoder {
   const std::unordered_map<std::string, std::string>& options() const {
     return options_;
   }
+
+  Status VerifyBasicInfo(const JxlBasicInfo& info) const;
+
+  Status VerifyFormat(const JxlPixelFormat& format) const;
+
+  Status VerifyBitDepth(JxlDataType data_type, uint32_t bits_per_sample,
+                        uint32_t exponent_bits) const;
+
+  Status VerifyPackedImage(const PackedImage& image,
+                           const JxlBasicInfo& info) const;
 
  private:
   std::unordered_map<std::string, std::string> options_;

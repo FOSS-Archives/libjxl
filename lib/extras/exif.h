@@ -3,16 +3,18 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#ifndef LIB_EXTRAS_EXIF_H_
+#define LIB_EXTRAS_EXIF_H_
+
 #include <stdint.h>
 
-#include "lib/jxl/base/padded_bytes.h"
-#include "lib/jxl/base/status.h"
-#include "lib/jxl/codec_in_out.h"
+#include <vector>
 
 namespace jxl {
-namespace test {
 
-Status DecodeImageY4M(const Span<const uint8_t> bytes, CodecInOut* io);
+// Sets the Exif orientation to the identity, to avoid repeated orientation
+void ResetExifOrientation(std::vector<uint8_t>& exif);
 
-}  // namespace test
 }  // namespace jxl
+
+#endif  // LIB_EXTRAS_EXIF_H_

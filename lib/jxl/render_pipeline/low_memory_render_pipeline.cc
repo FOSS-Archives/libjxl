@@ -303,17 +303,6 @@ void LowMemoryRenderPipeline::Init() {
     stages_[i]->SetInputSizes(input_sizes);
   }
 
-  // Check that kInput stages appear after the switch to image dimensions (if
-  // any).
-  for (size_t i = 0; i < stages_.size(); i++) {
-    for (size_t c = 0; c < shifts.size(); c++) {
-      if (stages_[i]->GetChannelMode(c) == RenderPipelineChannelMode::kInput) {
-        JXL_ASSERT(first_image_dim_stage_ == stages_.size() ||
-                   i >= first_image_dim_stage_);
-      }
-    }
-  }
-
   anyc_.resize(stages_.size());
   for (size_t i = 0; i < stages_.size(); i++) {
     for (size_t c = 0; c < shifts.size(); c++) {
@@ -408,17 +397,21 @@ void LowMemoryRenderPipeline::PrepareForThreadsInternal(size_t num,
     }
   }
   if (first_image_dim_stage_ != stages_.size()) {
-    out_of_frame_data_.resize(num);
-    size_t left_padding = std::max<ssize_t>(0, frame_origin_.x0);
+    RectT<ssize_t> image_rect(0, 0, frame_dimensions_.xsize_upsampled,
+                              frame_dimensions_.ysize_upsampled);
+    RectT<ssize_t> full_image_rect(0, 0, full_image_xsize_, full_image_ysize_);
+    image_rect = image_rect.Translate(frame_origin_.x0, frame_origin_.y0);
+    image_rect = image_rect.Intersection(full_image_rect);
+    if (image_rect.xsize() == 0 || image_rect.ysize() == 0) {
+      image_rect = RectT<ssize_t>(0, 0, 0, 0);
+    }
+    size_t left_padding = image_rect.x0();
     size_t middle_padding = group_dim;
-    ssize_t last_x =
-        frame_origin_.x0 + std::min(frame_dimensions_.xsize_groups * group_dim,
-                                    frame_dimensions_.xsize_upsampled);
-    last_x = Clamp1<ssize_t>(last_x, 0, full_image_xsize_);
-    size_t right_padding = full_image_xsize_ - last_x;
+    size_t right_padding = full_image_xsize_ - image_rect.x1();
     size_t out_of_frame_xsize =
         padding +
         std::max(left_padding, std::max(middle_padding, right_padding));
+    out_of_frame_data_.resize(num);
     for (size_t t = 0; t < num; t++) {
       out_of_frame_data_[t] = ImageF(out_of_frame_xsize, shifts.size());
     }
@@ -797,15 +790,27 @@ void LowMemoryRenderPipeline::ProcessBuffers(size_t group_id,
     RectT<ssize_t> full_image_rect(0, 0, full_image_xsize_, full_image_ysize_);
     group_rect = group_rect.Translate(frame_origin_.x0, frame_origin_.y0);
     image_rect = image_rect.Translate(frame_origin_.x0, frame_origin_.y0);
-    group_rect =
-        group_rect.Intersection(image_rect).Intersection(full_image_rect);
+    image_rect = image_rect.Intersection(full_image_rect);
+    group_rect = group_rect.Intersection(image_rect);
     size_t x0 = group_rect.x0();
     size_t y0 = group_rect.y0();
     size_t x1 = group_rect.x1();
     size_t y1 = group_rect.y1();
+    JXL_DEBUG_V(6,
+                "Rendering padding for full image rect %s "
+                "outside group rect %s",
+                Description(full_image_rect).c_str(),
+                Description(group_rect).c_str());
 
-    // Do not render padding if group is empty; if group is empty x0, y0 might
-    // have arbitrary values (from frame_origin).
+    if (group_id == 0 && (image_rect.xsize() == 0 || image_rect.ysize() == 0)) {
+      // If this frame does not intersect with the full image, we have to
+      // initialize the whole image area with RenderPadding.
+      RenderPadding(thread_id,
+                    Rect(0, 0, full_image_xsize_, full_image_ysize_));
+    }
+
+    // Render padding for groups that intersect with the full image. The case
+    // where no groups intersect was handled above.
     if (group_rect.xsize() > 0 && group_rect.ysize() > 0) {
       if (gx == 0 && gy == 0) {
         RenderPadding(thread_id, Rect(0, 0, x0, y0));

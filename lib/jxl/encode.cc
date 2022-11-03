@@ -22,6 +22,7 @@
 #include "lib/jxl/enc_file.h"
 #include "lib/jxl/enc_icc_codec.h"
 #include "lib/jxl/encode_internal.h"
+#include "lib/jxl/exif.h"
 #include "lib/jxl/jpeg/enc_jpeg_data.h"
 #include "lib/jxl/sanitizers.h"
 
@@ -196,6 +197,36 @@ int VerifyLevelSettings(const JxlEncoder* enc, std::string* debug_string) {
   // All level 5 checks passes, so can return the more compatible level 5
   return 5;
 }
+
+size_t BitsPerChannel(JxlDataType data_type) {
+  switch (data_type) {
+    case JXL_TYPE_UINT8:
+      return 8;
+    case JXL_TYPE_UINT16:
+      return 16;
+    case JXL_TYPE_FLOAT:
+      return 32;
+    case JXL_TYPE_FLOAT16:
+      return 16;
+    default:
+      return 0;  // signals unhandled JxlDataType
+  }
+}
+
+template <typename T>
+uint32_t GetBitDepth(JxlBitDepth bit_depth, const T& metadata,
+                     JxlPixelFormat format) {
+  if (bit_depth.type == JXL_BIT_DEPTH_FROM_PIXEL_FORMAT) {
+    return BitsPerChannel(format.data_type);
+  } else if (bit_depth.type == JXL_BIT_DEPTH_FROM_CODESTREAM) {
+    return metadata.bit_depth.bits_per_sample;
+  } else if (bit_depth.type == JXL_BIT_DEPTH_CUSTOM) {
+    return bit_depth.bits_per_sample;
+  } else {
+    return 0;
+  }
+}
+
 JxlEncoderStatus CheckValidBitdepth(uint32_t bits_per_sample,
                                     uint32_t exponent_bits_per_sample) {
   if (!exponent_bits_per_sample) {
@@ -208,6 +239,18 @@ JxlEncoderStatus CheckValidBitdepth(uint32_t bits_per_sample,
              (bits_per_sample > 24 + exponent_bits_per_sample) ||
              (bits_per_sample < 3 + exponent_bits_per_sample)) {
     return JXL_API_ERROR_NOSET("Invalid float description");
+  }
+  return JXL_ENC_SUCCESS;
+}
+
+JxlEncoderStatus VerifyInputBitDepth(JxlBitDepth bit_depth,
+                                     JxlPixelFormat format) {
+  if ((format.data_type == JXL_TYPE_FLOAT ||
+       format.data_type == JXL_TYPE_FLOAT16) &&
+      bit_depth.type != JXL_BIT_DEPTH_FROM_PIXEL_FORMAT) {
+    return JXL_API_ERROR_NOSET(
+        "Only JXL_BIT_DEPTH_FROM_PIXEL_FORMAT is "
+        "implemented for float types.");
   }
   return JXL_ENC_SUCCESS;
 }
@@ -308,6 +351,8 @@ JxlEncoderStatus JxlEncoderStruct::RefillOutputByteQueue() {
     // indicate full incompatibility.
     JXL_ASSERT(required_level == -1 || required_level == 5 ||
                required_level == 10);
+    // codestream_level == -1 means auto-set to the required level
+    if (codestream_level == -1) codestream_level = required_level;
     if (codestream_level == 5 && required_level != 5) {
       // If the required level is 10, return error rather than automatically
       // setting the level to 10, to avoid inadvertently creating a level 10
@@ -317,7 +362,7 @@ JxlEncoderStatus JxlEncoderStruct::RefillOutputByteQueue() {
           ("Codestream level verification for level 5 failed: " + level_message)
               .c_str());
     }
-    if (codestream_level == 10 && required_level == -1) {
+    if (required_level == -1) {
       return JXL_API_ERROR(
           this, JXL_ENC_ERR_API_USAGE, "%s",
           ("Codestream level verification for level 10 failed: " +
@@ -625,6 +670,11 @@ JxlEncoderStatus JxlEncoderSetICCProfile(JxlEncoder* enc,
   if (!enc->intensity_target_set) {
     jxl::SetIntensityTarget(&enc->metadata.m);
   }
+
+  if (!enc->basic_info.uses_original_profile) {
+    enc->metadata.m.color_encoding.DecideIfWantICC();
+  }
+
   return JXL_ENC_SUCCESS;
 }
 
@@ -783,7 +833,8 @@ JxlEncoderStatus JxlEncoderSetBasicInfo(JxlEncoder* enc,
   std::string level_message;
   int required_level = VerifyLevelSettings(enc, &level_message);
   if (required_level == -1 ||
-      static_cast<int>(enc->codestream_level) < required_level) {
+      (static_cast<int>(enc->codestream_level) < required_level &&
+       enc->codestream_level != -1)) {
     return JXL_API_ERROR(
         enc, JXL_ENC_ERR_API_USAGE, "%s",
         ("Codestream level verification for level " +
@@ -837,7 +888,8 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelInfo(
   std::string level_message;
   int required_level = VerifyLevelSettings(enc, &level_message);
   if (required_level == -1 ||
-      static_cast<int>(enc->codestream_level) < required_level) {
+      (static_cast<int>(enc->codestream_level) < required_level &&
+       enc->codestream_level != -1)) {
     return JXL_API_ERROR(
         enc, JXL_ENC_ERR_API_USAGE, "%s",
         ("Codestream level verification for level " +
@@ -887,8 +939,9 @@ JxlEncoderStatus JxlEncoderSetFrameLossless(
     JxlEncoderFrameSettings* frame_settings, const JXL_BOOL lossless) {
   if (lossless && frame_settings->enc->basic_info_set &&
       frame_settings->enc->metadata.m.xyb_encoded) {
-    return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
-                         "Set use_original_profile=true for lossless encoding");
+    return JXL_API_ERROR(
+        frame_settings->enc, JXL_ENC_ERR_API_USAGE,
+        "Set uses_original_profile=true for lossless encoding");
   }
   frame_settings->values.lossless = lossless;
   return JXL_ENC_SUCCESS;
@@ -910,7 +963,8 @@ JxlEncoderStatus JxlEncoderSetFrameDistance(
     JxlEncoderFrameSettings* frame_settings, float distance) {
   if (distance < 0.f || distance > 25.f) {
     return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
-                         "Distance has to be in [0.0..25.0]");
+                         "Distance has to be in [0.0..25.0] (corresponding to "
+                         "quality in [0.0..100.0])");
   }
   if (distance > 0.f && distance < 0.01f) {
     distance = 0.01f;
@@ -933,7 +987,7 @@ JxlEncoderStatus JxlEncoderOptionsSetDecodingSpeed(
 
 JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
     JxlEncoderFrameSettings* frame_settings, JxlEncoderFrameSettingId option,
-    int32_t value) {
+    int64_t value) {
   // check if value is -1, 0 or 1 for Override-type options
   switch (option) {
     case JXL_ENC_FRAME_SETTING_NOISE:
@@ -948,6 +1002,7 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
     case JXL_ENC_FRAME_SETTING_QPROGRESSIVE_AC:
     case JXL_ENC_FRAME_SETTING_LOSSY_PALETTE:
     case JXL_ENC_FRAME_SETTING_JPEG_RECON_CFL:
+    case JXL_ENC_FRAME_SETTING_JPEG_COMPRESS_BOXES:
       if (value < -1 || value > 1) {
         return JXL_API_ERROR(
             frame_settings->enc, JXL_ENC_ERR_API_USAGE,
@@ -1010,13 +1065,6 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
       }
       frame_settings->values.cparams.already_downsampled = (value == 1);
       return JXL_ENC_SUCCESS;
-    case JXL_ENC_FRAME_SETTING_PHOTON_NOISE:
-      if (value < 0) return JXL_ENC_ERROR;
-      // TODO(lode): add encoder setting to set the 8 floating point values of
-      // the noise synthesis parameters per frame for more fine grained control.
-      frame_settings->values.cparams.photon_noise_iso =
-          static_cast<float>(value);
-      return JXL_ENC_SUCCESS;
     case JXL_ENC_FRAME_SETTING_NOISE:
       frame_settings->values.cparams.noise = static_cast<jxl::Override>(value);
       return JXL_ENC_SUCCESS;
@@ -1078,31 +1126,6 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
       }
       frame_settings->values.cparams.progressive_dc = value;
       return JXL_ENC_SUCCESS;
-    case JXL_ENC_FRAME_SETTING_CHANNEL_COLORS_GLOBAL_PERCENT:
-      if (value < -1 || value > 100) {
-        return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
-                             "Option value has to be in [-1..100]");
-      }
-      if (value == -1) {
-        frame_settings->values.cparams.channel_colors_pre_transform_percent =
-            95.0f;
-      } else {
-        frame_settings->values.cparams.channel_colors_pre_transform_percent =
-            static_cast<float>(value);
-      }
-      return JXL_ENC_SUCCESS;
-    case JXL_ENC_FRAME_SETTING_CHANNEL_COLORS_GROUP_PERCENT:
-      if (value < -1 || value > 100) {
-        return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
-                             "Option value has to be in [-1..100]");
-      }
-      if (value == -1) {
-        frame_settings->values.cparams.channel_colors_percent = 80.0f;
-      } else {
-        frame_settings->values.cparams.channel_colors_percent =
-            static_cast<float>(value);
-      }
-      return JXL_ENC_SUCCESS;
     case JXL_ENC_FRAME_SETTING_PALETTE_COLORS:
       if (value < -1 || value > 70913) {
         return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
@@ -1135,9 +1158,9 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
       }
       return JXL_ENC_SUCCESS;
     case JXL_ENC_FRAME_SETTING_MODULAR_COLOR_SPACE:
-      if (value < -1 || value > 48) {
+      if (value < -1 || value > 41) {
         return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
-                             "Option value has to be in [-1..48]");
+                             "Option value has to be in [-1..41]");
       }
       frame_settings->values.cparams.colorspace = value;
       return JXL_ENC_SUCCESS;
@@ -1163,23 +1186,6 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
       }
       frame_settings->values.cparams.options.predictor =
           static_cast<jxl::Predictor>(value);
-      return JXL_ENC_SUCCESS;
-    case JXL_ENC_FRAME_SETTING_MODULAR_MA_TREE_LEARNING_PERCENT:
-      if (value < -1) {
-        return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
-                             "Option value has to be in [-1..100]");
-      }
-      // This value is called "iterations" or "nb_repeats" in cjxl, but is in
-      // fact a fraction in range 0.0-1.0, with the defautl value 0.5.
-      // Convert from integer percentage to floating point fraction here.
-      if (value == -1) {
-        // TODO(lode): for this and many other settings, avoid duplicating the
-        // default values here and in enc_params.h and options.h, have one
-        // location where the defaults are specified.
-        frame_settings->values.cparams.options.nb_repeats = 0.5f;
-      } else {
-        frame_settings->values.cparams.options.nb_repeats = value * 0.01f;
-      }
       return JXL_ENC_SUCCESS;
     case JXL_ENC_FRAME_SETTING_MODULAR_NB_PREV_CHANNELS:
       // The max allowed value can in theory be higher. However, it depends on
@@ -1207,12 +1213,110 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
     case JXL_ENC_FRAME_INDEX_BOX:
       frame_settings->values.frame_index_box = true;
       return JXL_ENC_SUCCESS;
+    case JXL_ENC_FRAME_SETTING_PHOTON_NOISE:
+      return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_NOT_SUPPORTED,
+                           "Float option, try setting it with "
+                           "JxlEncoderFrameSettingsSetFloatOption");
+    case JXL_ENC_FRAME_SETTING_JPEG_COMPRESS_BOXES:
+      frame_settings->values.cparams.jpeg_compress_boxes = value;
+      return JXL_ENC_SUCCESS;
     default:
       return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_NOT_SUPPORTED,
                            "Unknown option");
   }
 }
 
+JxlEncoderStatus JxlEncoderFrameSettingsSetFloatOption(
+    JxlEncoderFrameSettings* frame_settings, JxlEncoderFrameSettingId option,
+    float value) {
+  switch (option) {
+    case JXL_ENC_FRAME_SETTING_PHOTON_NOISE:
+      if (value < 0) return JXL_ENC_ERROR;
+      // TODO(lode): add encoder setting to set the 8 floating point values of
+      // the noise synthesis parameters per frame for more fine grained control.
+      frame_settings->values.cparams.photon_noise_iso = value;
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_FRAME_SETTING_MODULAR_MA_TREE_LEARNING_PERCENT:
+      if (value < -1.f || value > 100.f) {
+        return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
+                             "Option value has to be smaller than 100");
+      }
+      // This value is called "iterations" or "nb_repeats" in cjxl, but is in
+      // fact a fraction in range 0.0-1.0, with the default value 0.5.
+      // Convert from floating point percentage to floating point fraction here.
+      if (value < -.5f) {
+        // TODO(lode): for this and many other settings (also in
+        // JxlEncoderFrameSettingsSetOption), avoid duplicating the default
+        // values here and in enc_params.h and options.h, have one location
+        // where the defaults are specified.
+        frame_settings->values.cparams.options.nb_repeats = 0.5f;
+      } else {
+        frame_settings->values.cparams.options.nb_repeats = value * 0.01f;
+      }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_FRAME_SETTING_CHANNEL_COLORS_GLOBAL_PERCENT:
+      if (value < -1.f || value > 100.f) {
+        return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
+                             "Option value has to be in [-1..100]");
+      }
+      if (value < -.5f) {
+        frame_settings->values.cparams.channel_colors_pre_transform_percent =
+            95.0f;
+      } else {
+        frame_settings->values.cparams.channel_colors_pre_transform_percent =
+            value;
+      }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_FRAME_SETTING_CHANNEL_COLORS_GROUP_PERCENT:
+      if (value < -1.f || value > 100.f) {
+        return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
+                             "Option value has to be in [-1..100]");
+      }
+      if (value < -.5f) {
+        frame_settings->values.cparams.channel_colors_percent = 80.0f;
+      } else {
+        frame_settings->values.cparams.channel_colors_percent = value;
+      }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_FRAME_SETTING_EFFORT:
+    case JXL_ENC_FRAME_SETTING_DECODING_SPEED:
+    case JXL_ENC_FRAME_SETTING_RESAMPLING:
+    case JXL_ENC_FRAME_SETTING_EXTRA_CHANNEL_RESAMPLING:
+    case JXL_ENC_FRAME_SETTING_ALREADY_DOWNSAMPLED:
+    case JXL_ENC_FRAME_SETTING_NOISE:
+    case JXL_ENC_FRAME_SETTING_DOTS:
+    case JXL_ENC_FRAME_SETTING_PATCHES:
+    case JXL_ENC_FRAME_SETTING_EPF:
+    case JXL_ENC_FRAME_SETTING_GABORISH:
+    case JXL_ENC_FRAME_SETTING_MODULAR:
+    case JXL_ENC_FRAME_SETTING_KEEP_INVISIBLE:
+    case JXL_ENC_FRAME_SETTING_GROUP_ORDER:
+    case JXL_ENC_FRAME_SETTING_GROUP_ORDER_CENTER_X:
+    case JXL_ENC_FRAME_SETTING_GROUP_ORDER_CENTER_Y:
+    case JXL_ENC_FRAME_SETTING_RESPONSIVE:
+    case JXL_ENC_FRAME_SETTING_PROGRESSIVE_AC:
+    case JXL_ENC_FRAME_SETTING_QPROGRESSIVE_AC:
+    case JXL_ENC_FRAME_SETTING_PROGRESSIVE_DC:
+    case JXL_ENC_FRAME_SETTING_PALETTE_COLORS:
+    case JXL_ENC_FRAME_SETTING_LOSSY_PALETTE:
+    case JXL_ENC_FRAME_SETTING_COLOR_TRANSFORM:
+    case JXL_ENC_FRAME_SETTING_MODULAR_COLOR_SPACE:
+    case JXL_ENC_FRAME_SETTING_MODULAR_GROUP_SIZE:
+    case JXL_ENC_FRAME_SETTING_MODULAR_PREDICTOR:
+    case JXL_ENC_FRAME_SETTING_MODULAR_NB_PREV_CHANNELS:
+    case JXL_ENC_FRAME_SETTING_JPEG_RECON_CFL:
+    case JXL_ENC_FRAME_INDEX_BOX:
+    case JXL_ENC_FRAME_SETTING_BROTLI_EFFORT:
+    case JXL_ENC_FRAME_SETTING_FILL_ENUM:
+    case JXL_ENC_FRAME_SETTING_JPEG_COMPRESS_BOXES:
+      return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_NOT_SUPPORTED,
+                           "Int option, try setting it with "
+                           "JxlEncoderFrameSettingsSetOption");
+    default:
+      return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_NOT_SUPPORTED,
+                           "Unknown option");
+  }
+}
 JxlEncoder* JxlEncoderCreate(const JxlMemoryManager* memory_manager) {
   JxlMemoryManager local_memory_manager;
   if (!jxl::MemoryManagerInit(&local_memory_manager, memory_manager)) {
@@ -1253,7 +1357,7 @@ void JxlEncoderReset(JxlEncoder* enc) {
   enc->intensity_target_set = false;
   enc->use_container = false;
   enc->use_boxes = false;
-  enc->codestream_level = 5;
+  enc->codestream_level = -1;
   JxlEncoderInitBasicInfo(&enc->basic_info);
 }
 
@@ -1289,7 +1393,7 @@ JxlEncoderStatus JxlEncoderStoreJPEGMetadata(JxlEncoder* enc,
 }
 
 JxlEncoderStatus JxlEncoderSetCodestreamLevel(JxlEncoder* enc, int level) {
-  if (level != 5 && level != 10) {
+  if (level != -1 && level != 5 && level != 10) {
     return JXL_API_ERROR(enc, JXL_ENC_ERR_NOT_SUPPORTED, "invalid level");
   }
   if (enc->wrote_bytes) {
@@ -1389,6 +1493,11 @@ JxlEncoderStatus JxlEncoderAddJPEGFrame(
                          "Can't XYB encode a lossless JPEG");
   }
   if (!io.blobs.exif.empty()) {
+    JxlOrientation orientation = static_cast<JxlOrientation>(
+        frame_settings->enc->metadata.m.orientation);
+    jxl::InterpretExif(io.blobs.exif, &orientation);
+    frame_settings->enc->metadata.m.orientation = orientation;
+
     size_t exif_size = io.blobs.exif.size();
     // Exif data in JPEG is limited to 64k
     if (exif_size > 0xFFFF) {
@@ -1400,17 +1509,19 @@ JxlEncoderStatus JxlEncoderAddJPEGFrame(
     memcpy(exif.data() + 4, io.blobs.exif.data(), io.blobs.exif.size());
     JxlEncoderUseBoxes(frame_settings->enc);
     JxlEncoderAddBox(frame_settings->enc, "Exif", exif.data(), exif_size,
-                     /*compress_box=*/JXL_TRUE);
+                     frame_settings->values.cparams.jpeg_compress_boxes);
   }
   if (!io.blobs.xmp.empty()) {
     JxlEncoderUseBoxes(frame_settings->enc);
     JxlEncoderAddBox(frame_settings->enc, "xml ", io.blobs.xmp.data(),
-                     io.blobs.xmp.size(), /*compress_box=*/JXL_TRUE);
+                     io.blobs.xmp.size(),
+                     frame_settings->values.cparams.jpeg_compress_boxes);
   }
   if (!io.blobs.jumbf.empty()) {
     JxlEncoderUseBoxes(frame_settings->enc);
     JxlEncoderAddBox(frame_settings->enc, "jumb", io.blobs.jumbf.data(),
-                     io.blobs.jumbf.size(), /*compress_box=*/JXL_TRUE);
+                     io.blobs.jumbf.size(),
+                     frame_settings->values.cparams.jpeg_compress_boxes);
   }
   if (frame_settings->enc->store_jpeg_metadata) {
     jxl::jpeg::JPEGData data_in = *io.Main().jpeg_data;
@@ -1563,16 +1674,27 @@ JxlEncoderStatus JxlEncoderAddImageFrame(
   queued_frame->frame.blend =
       frame_settings->values.header.layer_info.blend_info.source > 0;
 
-  if (!jxl::BufferToImageBundle(*pixel_format, xsize, ysize, buffer, size,
-                                frame_settings->enc->thread_pool.get(),
-                                c_current, &(queued_frame->frame))) {
+  if (JXL_ENC_SUCCESS !=
+      VerifyInputBitDepth(frame_settings->values.image_bit_depth,
+                          *pixel_format)) {
+    return JXL_API_ERROR_NOSET("Invalid input bit depth");
+  }
+  size_t bits_per_sample =
+      GetBitDepth(frame_settings->values.image_bit_depth,
+                  frame_settings->enc->metadata.m, *pixel_format);
+  const uint8_t* uint8_buffer = reinterpret_cast<const uint8_t*>(buffer);
+  if (!jxl::ConvertFromExternal(
+          jxl::Span<const uint8_t>(uint8_buffer, size), xsize, ysize, c_current,
+          /*alpha_is_premultiplied=*/false, bits_per_sample, *pixel_format,
+          frame_settings->enc->thread_pool.get(), &(queued_frame->frame))) {
     return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
                          "Invalid input buffer");
   }
   if (frame_settings->values.lossless &&
       frame_settings->enc->metadata.m.xyb_encoded) {
-    return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
-                         "Set use_original_profile=true for lossless encoding");
+    return JXL_API_ERROR(
+        frame_settings->enc, JXL_ENC_ERR_API_USAGE,
+        "Set uses_original_profile=true for lossless encoding");
   }
   queued_frame->option_values.cparams.level =
       frame_settings->enc->codestream_level;
@@ -1652,14 +1774,25 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelBuffer(
     return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_GENERIC,
                          "bad dimensions");
   }
-  if (!jxl::BufferToImageF(*pixel_format, xsize, ysize, buffer, size,
-                           frame_settings->enc->thread_pool.get(),
-                           &frame_settings->enc->input_queue.back()
-                                .frame->frame.extra_channels()[index])) {
+  JxlPixelFormat ec_format = *pixel_format;
+  ec_format.num_channels = 1;
+  if (JXL_ENC_SUCCESS !=
+      VerifyInputBitDepth(frame_settings->values.image_bit_depth, ec_format)) {
+    return JXL_API_ERROR_NOSET("Invalid input bit depth");
+  }
+  size_t bits_per_sample = GetBitDepth(
+      frame_settings->values.image_bit_depth,
+      frame_settings->enc->metadata.m.extra_channel_info[index], ec_format);
+  const uint8_t* uint8_buffer = reinterpret_cast<const uint8_t*>(buffer);
+  auto queued_frame = frame_settings->enc->input_queue.back().frame.get();
+  if (!jxl::ConvertFromExternal(jxl::Span<const uint8_t>(uint8_buffer, size),
+                                xsize, ysize, bits_per_sample, ec_format, 0,
+                                frame_settings->enc->thread_pool.get(),
+                                &queued_frame->frame.extra_channels()[index])) {
     return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_API_USAGE,
                          "Failed to set buffer for extra channel");
   }
-  frame_settings->enc->input_queue.back().frame->ec_initialized[index] = 1;
+  queued_frame->ec_initialized[index] = 1;
 
   return JXL_ENC_SUCCESS;
 }
@@ -1746,6 +1879,19 @@ JxlEncoderStatus JxlEncoderSetFrameName(JxlEncoderFrameSettings* frame_settings,
   }
   frame_settings->values.frame_name = str;
   frame_settings->values.header.name_length = str.size();
+  return JXL_ENC_SUCCESS;
+}
+
+JxlEncoderStatus JxlEncoderSetFrameBitDepth(
+    JxlEncoderFrameSettings* frame_settings, const JxlBitDepth* bit_depth) {
+  if (bit_depth->type != JXL_BIT_DEPTH_FROM_PIXEL_FORMAT &&
+      bit_depth->type != JXL_BIT_DEPTH_FROM_CODESTREAM) {
+    return JXL_API_ERROR_NOSET(
+        "Only JXL_BIT_DEPTH_FROM_PIXEL_FORMAT and "
+        "JXL_BIT_DEPTH_FROM_CODESTREAM is implemented "
+        "for input buffers.");
+  }
+  frame_settings->values.image_bit_depth = *bit_depth;
   return JXL_ENC_SUCCESS;
 }
 
