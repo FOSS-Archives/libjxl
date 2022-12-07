@@ -108,6 +108,7 @@ typedef struct JxlEncoderFrameSettingsValuesStruct {
   JxlFrameHeader header;
   std::vector<JxlBlendInfo> extra_channel_blend_info;
   std::string frame_name;
+  JxlBitDepth image_bit_depth;
   bool frame_index_box = false;
 } JxlEncoderFrameSettingsValues;
 
@@ -216,7 +217,7 @@ struct JxlEncoderStruct {
   // TODO(lode): move level into jxl::CompressParams since some C++
   // implementation decisions should be based on it: level 10 allows more
   // features to be used.
-  uint32_t codestream_level;
+  int32_t codestream_level;
   bool store_jpeg_metadata;
   jxl::CodecMetadata metadata;
   std::vector<uint8_t> jpeg_metadata;

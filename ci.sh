@@ -15,13 +15,14 @@ OS=`uname -s`
 MYDIR=$(dirname $(realpath "$0"))
 
 ### Environment parameters:
-TEST_STACK_LIMIT="${TEST_STACK_LIMIT:-128}"
+TEST_STACK_LIMIT="${TEST_STACK_LIMIT:-256}"
 CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-RelWithDebInfo}
 CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}
 CMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER:-}
 CMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER:-}
 CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM:-}
 SKIP_TEST="${SKIP_TEST:-0}"
+TEST_SELECTOR="${TEST_SELECTOR:-}"
 BUILD_TARGET="${BUILD_TARGET:-}"
 ENABLE_WASM_SIMD="${ENABLE_WASM_SIMD:-0}"
 if [[ -n "${BUILD_TARGET}" ]]; then
@@ -45,7 +46,7 @@ SANITIZER="none"
 if [[ "${BUILD_TARGET%%-*}" == "x86_64" ||
     "${BUILD_TARGET%%-*}" == "i686" ]]; then
   # Default to building all targets, even if compiler baseline is SSE4
-  HWY_BASELINE_TARGETS=${HWY_BASELINE_TARGETS:-HWY_SCALAR}
+  HWY_BASELINE_TARGETS=${HWY_BASELINE_TARGETS:-HWY_EMU128}
 else
   HWY_BASELINE_TARGETS=${HWY_BASELINE_TARGETS:-}
 fi
@@ -66,6 +67,11 @@ if [[ "${ENABLE_WASM_SIMD}" -ne "0" ]]; then
   CMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS} -msimd128"
   CMAKE_C_FLAGS="${CMAKE_C_FLAGS} -msimd128"
   CMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS} -msimd128"
+fi
+
+if [[ "${ENABLE_WASM_SIMD}" -eq "2" ]]; then
+  CMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS} -DHWY_WANT_WASM2"
+  CMAKE_C_FLAGS="${CMAKE_C_FLAGS} -DHWY_WANT_WASM2"
 fi
 
 if [[ ! -z "${HWY_BASELINE_TARGETS}" ]]; then
@@ -475,7 +481,7 @@ cmake_build_and_test() {
     (cd "${BUILD_DIR}"
      export UBSAN_OPTIONS=print_stacktrace=1
      [[ "${TEST_STACK_LIMIT}" == "none" ]] || ulimit -s "${TEST_STACK_LIMIT}"
-     ctest -j $(nproc --all || echo 1) --output-on-failure)
+     ctest -j $(nproc --all || echo 1) ${TEST_SELECTOR} --output-on-failure)
   fi
 }
 
@@ -546,6 +552,7 @@ cmd_coverage_report() {
     # Only print coverage information for the libjxl directories. The rest
     # is not part of the code under test.
     --filter '.*jxl/.*'
+    --exclude '.*_gbench.cc'
     --exclude '.*_test.cc'
     --exclude '.*_testonly..*'
     --exclude '.*_debug.*'
@@ -575,7 +582,7 @@ cmd_test() {
   (cd "${BUILD_DIR}"
    export UBSAN_OPTIONS=print_stacktrace=1
    [[ "${TEST_STACK_LIMIT}" == "none" ]] || ulimit -s "${TEST_STACK_LIMIT}"
-   ctest -j $(nproc --all || echo 1) --output-on-failure "$@")
+   ctest -j $(nproc --all || echo 1) ${TEST_SELECTOR} --output-on-failure "$@")
 }
 
 cmd_gbench() {
@@ -701,20 +708,24 @@ cmd_msan_install() {
   export CC="${CC:-clang}"
   export CXX="${CXX:-clang++}"
   detect_clang_version
-  local llvm_tag="llvmorg-${CLANG_VERSION}.0.0"
-  case "${CLANG_VERSION}" in
-    "6.0")
-      llvm_tag="llvmorg-6.0.1"
-      ;;
-    "7")
-      llvm_tag="llvmorg-7.0.1"
-      ;;
-  esac
-  local llvm_targz="${tmpdir}/${llvm_tag}.tar.gz"
-  curl -L --show-error -o "${llvm_targz}" \
-    "https://github.com/llvm/llvm-project/archive/${llvm_tag}.tar.gz"
-  tar -C "${tmpdir}" -zxf "${llvm_targz}"
-  local llvm_root="${tmpdir}/llvm-project-${llvm_tag}"
+  # Allow overriding the LLVM checkout.
+  local llvm_root="${LLVM_ROOT:-}"
+  if [ -z "${llvm_root}" ]; then
+    local llvm_tag="llvmorg-${CLANG_VERSION}.0.0"
+    case "${CLANG_VERSION}" in
+      "6.0")
+        llvm_tag="llvmorg-6.0.1"
+        ;;
+      "7")
+        llvm_tag="llvmorg-7.0.1"
+        ;;
+    esac
+    local llvm_targz="${tmpdir}/${llvm_tag}.tar.gz"
+    curl -L --show-error -o "${llvm_targz}" \
+      "https://github.com/llvm/llvm-project/archive/${llvm_tag}.tar.gz"
+    tar -C "${tmpdir}" -zxf "${llvm_targz}"
+    llvm_root="${tmpdir}/llvm-project-${llvm_tag}"
+  fi
 
   local msan_prefix="${HOME}/.msan/${CLANG_VERSION}"
   rm -rf "${msan_prefix}"
@@ -1209,10 +1220,10 @@ cmd_lint() {
     # We include in this linter all the changes including the uncommitted changes
     # to avoid printing changes already applied.
     set -x
+    # Ignoring the error that git-clang-format outputs.
     git -C "${MYDIR}" "${clang_format}" --binary "${clang_format}" \
-      --style=file --diff "${MR_ANCESTOR_SHA}" -- >"${tmppatch}"
+      --style=file --diff "${MR_ANCESTOR_SHA}" -- >"${tmppatch}" || true
     { set +x; } 2>/dev/null
-
     if grep -E '^--- ' "${tmppatch}">/dev/null; then
       if [[ -n "${LINT_OUTPUT:-}" ]]; then
         cp "${tmppatch}" "${LINT_OUTPUT}"
@@ -1389,10 +1400,8 @@ cmd_bump_version() {
     fi
   fi
 
-  newver="${major}.${minor}"
-  if [[ "${patch}" != "0" ]]; then
-    newver="${newver}.${patch}"
-  fi
+  newver="${major}.${minor}.${patch}"
+
   echo "Bumping version to ${newver} (${major}.${minor}.${patch})"
   sed -E \
     -e "s/(set\\(JPEGXL_MAJOR_VERSION) [0-9]+\\)/\\1 ${major})/" \
@@ -1413,11 +1422,14 @@ cmd_bump_version() {
 # Check that the AUTHORS file contains the email of the committer.
 cmd_authors() {
   merge_request_commits
-  # TODO(deymo): Handle multiple commits and check that they are all the same
-  # author.
-  local email=$(git log --format='%ae' "${MR_HEAD_SHA}^!")
-  local name=$(git log --format='%an' "${MR_HEAD_SHA}^!")
-  "${MYDIR}"/tools/check_author.py "${email}" "${name}"
+  local emails
+  local names
+  readarray -t emails < <(git log --format='%ae' "${MR_ANCESTOR_SHA}..${MR_HEAD_SHA}")
+  readarray -t names < <(git log --format='%an' "${MR_ANCESTOR_SHA}..${MR_HEAD_SHA}")
+  for i in "${!names[@]}"; do
+    echo "Checking name '${names[$i]}' with email '${emails[$i]}' ..."
+    "${MYDIR}"/tools/check_author.py "${emails[$i]}" "${names[$i]}"
+  done
 }
 
 main() {
@@ -1480,6 +1492,7 @@ You can pass some optional environment variables as well:
  - SKIP_TEST=1: Skip the test stage.
  - STORE_IMAGES=0: Makes the benchmark discard the computed images.
  - TEST_STACK_LIMIT: Stack size limit (ulimit -s) during tests, in KiB.
+ - TEST_SELECTOR: pass additional arguments to ctest, e.g. "-R .Resample.".
  - STACK_SIZE=1: Generate binaries with the .stack_sizes sections.
 
 These optional environment variables are forwarded to the cmake call as

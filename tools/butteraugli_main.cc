@@ -42,6 +42,7 @@ Status WriteImage(Image3F&& image, const std::string& filename) {
 
 Status RunButteraugli(const char* pathname1, const char* pathname2,
                       const std::string& distmap_filename,
+                      const std::string& raw_distmap_filename,
                       const std::string& colorspace_hint, double p,
                       float intensity_target) {
   extras::ColorHints color_hints;
@@ -75,7 +76,7 @@ Status RunButteraugli(const char* pathname1, const char* pathname2,
 
   ImageF distmap;
   ButteraugliParams ba_params;
-  ba_params.hf_asymmetry = 0.8f;
+  ba_params.hf_asymmetry = 1.0f;
   ba_params.xmul = 1.0f;
   ba_params.intensity_target = intensity_target;
   const float distance = ButteraugliDistance(io1.Main(), io2.Main(), ba_params,
@@ -91,6 +92,16 @@ Status RunButteraugli(const char* pathname1, const char* pathname2,
     JXL_CHECK(
         WriteImage(CreateHeatMapImage(distmap, good, bad), distmap_filename));
   }
+  if (!raw_distmap_filename.empty()) {
+    FILE* out = fopen(raw_distmap_filename.c_str(), "w");
+    JXL_CHECK(out != nullptr);
+    fprintf(out, "Pf\n%" PRIuS " %" PRIuS "\n-1.0\n", distmap.xsize(),
+            distmap.ysize());
+    for (size_t y = distmap.ysize(); y-- > 0;) {
+      fwrite(distmap.Row(y), 4, distmap.xsize(), out);
+    }
+    fclose(out);
+  }
   return true;
 }
 
@@ -100,9 +111,12 @@ Status RunButteraugli(const char* pathname1, const char* pathname2,
 int main(int argc, char** argv) {
   if (argc < 3) {
     fprintf(stderr,
-            "Usage: %s <reference> <distorted> [--distmap <distmap>] "
-            "[--intensity_target <intensity_target>]\n"
-            "[--colorspace <colorspace_hint>]\n"
+            "Usage: %s <reference> <distorted>\n"
+            "  [--distmap <distmap>]\n"
+            "  [--rawdistmap <distmap.pfm>]\n"
+            "  [--intensity_target <intensity_target>]\n"
+            "  [--colorspace <colorspace_hint>]\n"
+            "  [--pnorm <pth norm>]\n"
             "NOTE: images get converted to linear sRGB for butteraugli. Images"
             " without attached profiles (such as ppm or pfm) are interpreted"
             " as nonlinear sRGB. The hint format is RGB_D65_SRG_Rel_Lin for"
@@ -112,16 +126,19 @@ int main(int argc, char** argv) {
     return 1;
   }
   std::string distmap;
+  std::string raw_distmap;
   std::string colorspace;
   double p = 3;
   float intensity_target = 80.0;  // sRGB intensity target.
   for (int i = 3; i < argc; i++) {
     if (std::string(argv[i]) == "--distmap" && i + 1 < argc) {
       distmap = argv[++i];
+    } else if (std::string(argv[i]) == "--rawdistmap" && i + 1 < argc) {
+      raw_distmap = argv[++i];
     } else if (std::string(argv[i]) == "--colorspace" && i + 1 < argc) {
       colorspace = argv[++i];
     } else if (std::string(argv[i]) == "--intensity_target" && i + 1 < argc) {
-      intensity_target = std::stof(std::string(argv[i + 1]));
+      intensity_target = std::stof(std::string(argv[++i]));
     } else if (std::string(argv[i]) == "--pnorm" && i + 1 < argc) {
       char* end;
       p = strtod(argv[++i], &end);
@@ -135,8 +152,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  return jxl::RunButteraugli(argv[1], argv[2], distmap, colorspace, p,
-                             intensity_target)
+  return jxl::RunButteraugli(argv[1], argv[2], distmap, raw_distmap, colorspace,
+                             p, intensity_target)
              ? 0
              : 1;
 }

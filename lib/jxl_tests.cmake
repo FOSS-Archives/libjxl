@@ -5,6 +5,7 @@ set(TEST_FILES
   extras/codec_test.cc
   extras/dec/color_description_test.cc
   extras/dec/pgx_test.cc
+  extras/decode_jpeg_test.cc
   jxl/ac_strategy_test.cc
   jxl/alpha_test.cc
   jxl/ans_common_test.cc
@@ -61,17 +62,17 @@ set(TEST_FILES
   ### Files before this line are handled by build_cleaner.py
   # TODO(deymo): Move this to tools/
   ../tools/box/box_test.cc
+  ../tools/djxl_fuzzer_test.cc
 )
 
 # Test-only library code.
 set(TESTLIB_FILES
-  jxl/codec_y4m_testonly.cc
-  jxl/codec_y4m_testonly.h
   jxl/dct_for_test.h
   jxl/dec_transforms_testonly.cc
   jxl/dec_transforms_testonly.h
   jxl/fake_parallel_runner_testonly.h
   jxl/image_test_utils.h
+  jxl/test_image.h
   jxl/test_utils.h
   jxl/testdata.h
 )
@@ -96,14 +97,18 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/tests)
 foreach (TESTFILE IN LISTS TEST_FILES)
   # The TESTNAME is the name without the extension or directory.
   get_filename_component(TESTNAME ${TESTFILE} NAME_WE)
-  add_executable(${TESTNAME} ${TESTFILE})
+  if(TESTFILE STREQUAL ../tools/djxl_fuzzer_test.cc)
+    add_executable(${TESTNAME} ${TESTFILE} ../tools/djxl_fuzzer.cc)
+  else()
+    add_executable(${TESTNAME} ${TESTFILE})
+  endif()
   if(JPEGXL_EMSCRIPTEN)
     # The emscripten linking step takes too much memory and crashes during the
     # wasm-opt step when using -O2 optimization level
     set_target_properties(${TESTNAME} PROPERTIES LINK_FLAGS "\
       -O1 \
       -s USE_LIBPNG=1 \
-      -s TOTAL_MEMORY=1536MB \
+      -s INITIAL_MEMORY=1536MB \
       -s SINGLE_FILE=1 \
       -s PROXY_TO_PTHREAD \
       -s EXIT_RUNTIME=1 \
@@ -119,8 +124,6 @@ foreach (TESTFILE IN LISTS TEST_FILES)
   )
   target_link_libraries(${TESTNAME}
     box
-    jxl-static
-    jxl_threads-static
     jxl_extras-static
     jxl_testlib-static
     gmock
@@ -129,10 +132,10 @@ foreach (TESTFILE IN LISTS TEST_FILES)
   )
   # Output test targets in the test directory.
   set_target_properties(${TESTNAME} PROPERTIES PREFIX "tests/")
-  if (WIN32 AND ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+  if (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set_target_properties(${TESTNAME} PROPERTIES COMPILE_FLAGS "-Wno-error")
   endif ()
-  if(${CMAKE_VERSION} VERSION_LESS "3.10.3")
+  if(CMAKE_VERSION VERSION_LESS "3.10.3")
     gtest_discover_tests(${TESTNAME} TIMEOUT 240)
   else ()
     gtest_discover_tests(${TESTNAME} DISCOVERY_TIMEOUT 240)

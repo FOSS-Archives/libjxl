@@ -196,6 +196,7 @@ Status FwdPaletteIteration(Image &input, uint32_t begin_c, uint32_t end_c,
       JXL_DEBUG_V(6, "Channel %i uses only %i colors.", begin_c, idx);
       Channel pch(idx, 1);
       pch.hshift = -1;
+      pch.vshift = -1;
       nb_colors = idx;
       idx = 0;
       pixel_type *JXL_RESTRICT p_palette = pch.Row(0);
@@ -232,6 +233,7 @@ Status FwdPaletteIteration(Image &input, uint32_t begin_c, uint32_t end_c,
     JXL_DEBUG_V(6, "Channel %i uses only %i colors.", begin_c, idx);
     Channel pch(idx, 1);
     pch.hshift = -1;
+    pch.vshift = -1;
     nb_colors = idx;
     idx = 0;
     pixel_type *JXL_RESTRICT p_palette = pch.Row(0);
@@ -337,10 +339,11 @@ Status FwdPaletteIteration(Image &input, uint32_t begin_c, uint32_t end_c,
 
   Channel pch(nb_colors, nb);
   pch.hshift = -1;
+  pch.vshift = -1;
   pixel_type *JXL_RESTRICT p_palette = pch.Row(0);
   intptr_t onerow = pch.plane.PixelsPerRow();
   intptr_t onerow_image = input.channel[begin_c].plane.PixelsPerRow();
-  const int bit_depth = input.bitdepth;
+  const int bit_depth = std::min(input.bitdepth, 24);
 
   if (lossy) {
     for (uint32_t i = 0; i < nb_deltas; i++) {

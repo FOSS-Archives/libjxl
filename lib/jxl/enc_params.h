@@ -48,68 +48,6 @@ enum class SpeedTier {
   kLightning = 9
 };
 
-inline bool ParseSpeedTier(const std::string& s, SpeedTier* out) {
-  if (s == "lightning") {
-    *out = SpeedTier::kLightning;
-    return true;
-  } else if (s == "thunder") {
-    *out = SpeedTier::kThunder;
-    return true;
-  } else if (s == "falcon") {
-    *out = SpeedTier::kFalcon;
-    return true;
-  } else if (s == "cheetah") {
-    *out = SpeedTier::kCheetah;
-    return true;
-  } else if (s == "hare") {
-    *out = SpeedTier::kHare;
-    return true;
-  } else if (s == "fast" || s == "wombat") {
-    *out = SpeedTier::kWombat;
-    return true;
-  } else if (s == "squirrel") {
-    *out = SpeedTier::kSquirrel;
-    return true;
-  } else if (s == "kitten") {
-    *out = SpeedTier::kKitten;
-    return true;
-  } else if (s == "guetzli" || s == "tortoise") {
-    *out = SpeedTier::kTortoise;
-    return true;
-  }
-  size_t st = 10 - static_cast<size_t>(strtoull(s.c_str(), nullptr, 0));
-  if (st <= static_cast<size_t>(SpeedTier::kLightning) &&
-      st >= static_cast<size_t>(SpeedTier::kTortoise)) {
-    *out = SpeedTier(st);
-    return true;
-  }
-  return false;
-}
-
-inline const char* SpeedTierName(SpeedTier speed_tier) {
-  switch (speed_tier) {
-    case SpeedTier::kLightning:
-      return "lightning";
-    case SpeedTier::kThunder:
-      return "thunder";
-    case SpeedTier::kFalcon:
-      return "falcon";
-    case SpeedTier::kCheetah:
-      return "cheetah";
-    case SpeedTier::kHare:
-      return "hare";
-    case SpeedTier::kWombat:
-      return "wombat";
-    case SpeedTier::kSquirrel:
-      return "squirrel";
-    case SpeedTier::kKitten:
-      return "kitten";
-    case SpeedTier::kTortoise:
-      return "tortoise";
-  }
-  return "INVALID";
-}
-
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct CompressParams {
   float butteraugli_distance = 1.0f;
@@ -174,34 +112,12 @@ struct CompressParams {
   // Default: on for lossless, off for lossy
   Override keep_invisible = Override::kDefault;
 
-  // Progressive-mode saliency.
-  //
-  // How many progressive saliency-encoding steps to perform.
-  // - 1: Encode only DC and lowest-frequency AC. Does not need a saliency-map.
-  // - 2: Encode only DC+LF, dropping all HF AC data.
-  //      Does not need a saliency-map.
-  // - 3: Encode DC+LF+{salient HF}, dropping all non-salient HF data.
-  // - 4: Encode DC+LF+{salient HF}+{other HF}.
-  // - 5: Encode DC+LF+{quantized HF}+{low HF bits}.
-  size_t saliency_num_progressive_steps = 3;
-  // Every saliency-heatmap cell with saliency >= threshold will be considered
-  // as 'salient'. The default value of 0.0 will consider every AC-block
-  // as salient, hence not require a saliency-map, and not actually generate
-  // a 4th progressive step.
-  float saliency_threshold = 0.0f;
-  // Saliency-map (owned by caller).
-  ImageF* saliency_map = nullptr;
-
-  // Input and output file name. Will be used to provide pluggable saliency
-  // extractor with paths.
-  const char* file_in = nullptr;
-  const char* file_out = nullptr;
-
   // Currently unused as of 2020-01.
   bool clear_metadata = false;
 
   // Prints extra information during/after encoding.
   bool verbose = false;
+  bool log_search_state = false;
 
   ButteraugliParams ba_params;
 
@@ -209,6 +125,9 @@ struct CompressParams {
   // effects on the decoded pixels, while still being JPEG-compliant and
   // allowing reconstruction of the original JPEG.
   bool force_cfl_jpeg_recompression = true;
+
+  // Use brotli compression for any boxes derived from a JPEG frame.
+  bool jpeg_compress_boxes = true;
 
   // Set the noise to what it would approximately be if shooting at the nominal
   // exposure for a given ISO setting on a 35mm camera.
@@ -242,8 +161,6 @@ struct CompressParams {
     color_transform = jxl::ColorTransform::kNone;
   }
 
-  bool use_new_heuristics = false;
-
   // Down/upsample the image before encoding / after decoding by this factor.
   // The resampling value can also be set to <= 0 to automatically choose based
   // on distance, however EncodeFrame doesn't support this, so it is
@@ -253,6 +170,11 @@ struct CompressParams {
   int ec_resampling = -1;
   // Skip the downsampling before encoding if this is true.
   bool already_downsampled = false;
+  // Butteraugli target distance on the original full size image, this can be
+  // different from butteraugli_distance if resampling was used.
+  float original_butteraugli_distance = -1.0f;
+
+  float quant_ac_rescale = 1.0;
 
   // Codestream level to conform to.
   // -1: don't care
@@ -265,13 +187,12 @@ struct CompressParams {
 static constexpr float kMinButteraugliForDynamicAR = 0.5f;
 static constexpr float kMinButteraugliForDots = 3.0f;
 static constexpr float kMinButteraugliToSubtractOriginalPatches = 3.0f;
-static constexpr float kMinButteraugliDistanceForProgressiveDc = 4.5f;
 
 // Always off
 static constexpr float kMinButteraugliForNoise = 99.0f;
 
 // Minimum butteraugli distance the encoder accepts.
-static constexpr float kMinButteraugliDistance = 0.01f;
+static constexpr float kMinButteraugliDistance = 0.001f;
 
 // Tile size for encoder-side processing. Must be equal to color tile dim in the
 // current implementation.

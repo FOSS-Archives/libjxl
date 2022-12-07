@@ -40,7 +40,7 @@ set_target_properties(${_target} PROPERTIES
 
 # Always install the library as jxl_threads.{a,so} file without the "-static"
 # suffix, except in Windows.
-if (NOT WIN32)
+if (NOT WIN32 OR MINGW)
   set_target_properties(${_target} PROPERTIES OUTPUT_NAME "jxl_threads")
 endif()
 install(TARGETS ${_target}
@@ -63,8 +63,7 @@ target_compile_definitions(jxl_threads-static
 
 
 ### Public shared library.
-if (((NOT DEFINED "${TARGET_SUPPORTS_SHARED_LIBS}") OR
-     TARGET_SUPPORTS_SHARED_LIBS) AND NOT JPEGXL_STATIC AND BUILD_SHARED_LIBS)
+if (BUILD_SHARED_LIBS)
 add_library(jxl_threads SHARED ${JPEGXL_THREADS_SOURCES})
 _set_jxl_threads(jxl_threads)
 
@@ -104,8 +103,7 @@ add_library(jxl_threads ALIAS jxl_threads-static)
 generate_export_header(jxl_threads-static
   BASE_NAME JXL_THREADS
   EXPORT_FILE_NAME include/jxl/jxl_threads_export.h)
-endif()  # TARGET_SUPPORTS_SHARED_LIBS AND NOT JPEGXL_STATIC AND
-         # BUILD_SHARED_LIBS
+endif()  # BUILD_SHARED_LIBS
 
 
 ### Add a pkg-config file for libjxl_threads.

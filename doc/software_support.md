@@ -17,6 +17,7 @@ Please add missing software to this list.
 - Safari: not supported, [tracking bug](https://bugs.webkit.org/show_bug.cgi?id=208235)
 - Edge: behind a flag since version 91, start with `.\msedge.exe --enable-features=JXL`
 - Opera: behind a flag since version 77.
+- Pale Moon: supported since version 31.4.0, [release notes](https://www.palemoon.org/releasenotes.shtml)
 - For all browsers and to track browsers progress see [Can I Use](https://caniuse.com/jpegxl).
 
 ## Image libraries
@@ -25,6 +26,8 @@ Please add missing software to this list.
 - [libvips](https://libvips.github.io/libvips/): supported since 8.11
 - [Imlib2](https://github.com/alistair7/imlib2-jxl)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg/search?q=jpeg-xl&type=commits)
+- [GDAL](https://gdal.org/drivers/raster/jpegxl.html): supported since 3.4.0 as a TIFF codec, and 3.6.0 as standalone format
+- [GraphicsMagick](http://www.graphicsmagick.org/NEWS.html#march-26-2022): supported since 1.3.38
 
 ## OS-level support / UI frameworks / file browser plugins
 
@@ -42,6 +45,7 @@ Please add missing software to this list.
 
 - [GIMP (since 2.99.8)](https://www.gimp.org/news/2021/10/20/gimp-2-99-8-released/); plugin for older versions available in libjxl repo
 - [Krita](https://invent.kde.org/graphics/krita/-/commit/13e5d2e5b9f0eac5c8064b7767f0b62264a0797b)
+- [Paint.NET](https://www.getpaint.net/index.html); supported since 4.3.12 - requires a [plugin](https://github.com/0xC0000054/pdn-jpegxl) to be downloaded and installed.
 - Photoshop: no plugin available yet, no official support yet
 
 ## Image viewers
@@ -54,6 +58,7 @@ Please add missing software to this list.
   - Qt viewers: gwenview, digiKam, KolourPaint, KPhotoAlbum, LXImage-Qt, qimgv, qView, nomacs, VookiImageViewer, PhotoQt
   - GTK viewers: Eye of Gnome (eog), gThumb, Geeqie
   - EFL viewers: entice, ephoto
+- [Swayimg](https://github.com/artemsen/swayimg)
 
 ## Online tools
 
